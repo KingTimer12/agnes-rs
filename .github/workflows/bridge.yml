@@ -159,7 +159,7 @@ jobs:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     environment: npm
     permissions:
-      contents: read
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -218,12 +218,13 @@ jobs:
             echo "publish=true" >> "$GITHUB_OUTPUT"
           fi
 
-      # `napi prepublish` publishes the per-platform packages and rewrites
-      # optionalDependencies; then publish the main agnes-bridge package.
-      - name: Publish platform packages
+      # `napi pre-publish` publishes the per-platform packages, rewrites
+      # optionalDependencies, and creates a GitHub release (tag v<version>).
+      # That release event triggers the agnes-library / agnes-cli publish.
+      - name: Publish platform packages + create GitHub release
         if: steps.version.outputs.publish == 'true'
         working-directory: agnes-bridge
-        run: bunx napi pre-publish -t npm --no-gh-release
+        run: bunx napi pre-publish -t npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

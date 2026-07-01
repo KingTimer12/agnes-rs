@@ -1,15 +1,235 @@
 # agnes-library
 
-To install dependencies:
+Type-safe TypeScript client for **[Agnes](../README.md)** — a database toolkit
+with a Rust core and a built-in, self-invalidating query cache. Define your
+schema as code, get fully-typed queries and relations, and talk to PostgreSQL,
+MySQL, or SQLite through one API.
 
 ```bash
-bun install
+bun add agnes-library agnes-bridge
 ```
 
-To run:
+> `agnes-bridge` is the native (napi-rs) addon that runs the engine. It's a
+> required peer of this package.
+
+---
+
+## Quick start
+
+```ts
+import { AgnesClient, table, int, text, bool, many, one, OnAction } from "agnes-library";
+
+export const schema = {
+  user: table({
+    id:     int("id").primary(),
+    name:   text("name").index("name_idx"),
+    email:  text("email").uniqueIndex("email_idx"),
+    age:    int("age"),
+    active: bool("active").default(true),
+    posts:  many("post", "userId"),
+  }, "users"),
+  post: table({
+    id:      int("id").primary(),
+    userId:  int("user_id"),
+    content: text("content"),
+    user:    one("user", "userId", "id", OnAction.None, OnAction.Cascade),
+  }, "posts"),
+};
+
+const db = await AgnesClient.create(
+  {
+    driver: "sqlite",
+    url: "sqlite:./demo.db",
+    cache: { enabled: true, walPath: ".agnes/cache.wal" },
+  },
+  schema,
+);
+```
+
+> Tip: `agnes generate` (from [`agnes-cli`](../agnes-cli)) writes this
+> `AgnesClient.create(...)` module for you from a single config.
+
+---
+
+## Defining a schema
+
+A schema is a `Record` of tables. `table(def, "physical_name")` maps a TS key to
+a real table name; each field is a column or a relation.
+
+### Column types
+
+| Helper | TS type | Notes |
+|--------|---------|-------|
+| `int(name)` | `number` | |
+| `bigint(name)` | `bigint` | |
+| `text(name)` | `string` | |
+| `bool(name)` | `boolean` | |
+| `float(name)` | `number` | |
+| `bytes(name)` | `Uint8Array` | |
+| `json<T>(name)` | `T` | typed JSON column |
+
+### Column modifiers (chainable)
+
+```ts
+int("id").primary()                 // PRIMARY KEY
+text("bio").nullable()              // NULL allowed → type becomes `string | null`
+bool("active").default(true)        // DEFAULT
+text("name").index("name_idx")      // non-unique index
+text("email").uniqueIndex("uq")     // unique index
+```
+
+### Relations
+
+```ts
+// This table has many rows of "post" whose `userId` points back here.
+posts: many("post", "userId"),
+
+// This table's `userId` references user.id (adds a FK).
+user:  one("user", "userId", "id", OnAction.None, OnAction.Cascade),
+```
+
+`OnAction`: `None` · `Restrict` · `Cascade` · `SetNull` · `SetDefault` (used for
+`ON UPDATE` / `ON DELETE`).
+
+---
+
+## Querying
+
+`columnsOf(schema.user.def)` gives you typed column handles for use in `where`,
+`orderBy`, and join conditions.
+
+```ts
+import { columnsOf, eq, gt } from "agnes-library";
+const u = columnsOf(schema.user.def);
+```
+
+### Select
+
+```ts
+const adults = await db
+  .select("user")
+  .where(gt(u.age, 18))
+  .orderBy(u.name, "asc")
+  .limit(50)
+  .ttl(60)          // cache result for 60s
+  .all();
+```
+
+`.first()` returns one row or `null`. `.bypassCache()` skips the cache for that
+query.
+
+### Relations with `.include()` (no N+1)
+
+```ts
+const withPosts = await db
+  .select("user")
+  .include({ posts: true })
+  .all();
+// → { ...user, posts: Post[] }[]  — one batched IN query per relation
+
+const postsWithAuthor = await db
+  .select("post")
+  .include({ user: true })
+  .all();
+// → { ...post, user: User | null }[]
+```
+
+Filter/shape a relation with `query()`:
+
+```ts
+import { query } from "agnes-library";
+
+await db.select("user").include({
+  posts: query().where(eq(p.published, true)).orderBy(p.createdAt, "desc").limit(5),
+}).all();
+```
+
+### SQL joins (flat rows)
+
+```ts
+import { on } from "agnes-library";
+await db.select("user").leftJoin("post", on(u.id, p.userId)).all();
+// also: innerJoin / rightJoin / fullJoin
+```
+
+### Conditions
+
+`eq` · `neq` · `gt` · `gte` · `lt` · `lte` · `like` — each takes a column handle
+and a value: `eq(u.id, 5)`.
+
+### Insert / update / delete
+
+```ts
+await db.insertInto("post").values({ userId: 1, content: "Hello!" });
+
+await db.update("user", { age: 31 }).where(eq(u.id, 5)).run();
+
+await db.deleteFrom("post").where(eq(p.id, 9)).run();
+```
+
+### Raw SQL
+
+```ts
+const rows = await db.query<{ id: number; name: string }>(
+  "SELECT id, name FROM users WHERE age > $1",
+  [18],
+  { ttl: 60 },
+);
+
+const affected = await db.mutate("UPDATE users SET active = $1", [false]);
+```
+
+---
+
+## Caching
+
+Reads are cached transparently in the Rust core:
+
+- **Automatic** on `SELECT` — set a TTL with `.ttl(secs)` or `query(..., { ttl })`.
+- **Content-addressed** keys — a BLAKE3 hash of the normalized SQL + params.
+- **Self-invalidating** — every write invalidates the cache tags of the tables it
+  touches (parsed from the SQL), so you never read stale data.
+- **WAL-backed** — durable across restarts (`walPath`).
+- **Opt-out** per query with `.bypassCache()` / `{ bypassCache: true }`.
+
+```ts
+type CacheConfig = { enabled: boolean; walPath?: string; compactionThreshold?: number };
+```
+
+---
+
+## Configuration
+
+```ts
+interface DatabaseConfig {
+  driver: "postgres" | "mysql" | "sqlite";
+  url: string;
+  maxConnections?: number;
+  cache?: CacheConfig;
+}
+```
+
+---
+
+## Type inference helpers
+
+```ts
+import type { InferRow, InferInsert } from "agnes-library";
+
+type User = InferRow<typeof schema.user.def>;        // full row type
+type NewUser = InferInsert<typeof schema.user.def>;  // partial, for inserts
+```
+
+---
+
+## Scripts
 
 ```bash
-bun run index.ts
+bun run build       # bundle to dist/ + emit .d.ts
+bun run typecheck   # tsc --noEmit
+bun test            # bun test
 ```
 
-This project was created using `bun init` in bun v1.3.10. [Bun](https://bun.com) is a fast all-in-one JavaScript runtime.
+## License
+
+MIT OR Apache-2.0
