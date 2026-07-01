@@ -9,6 +9,8 @@ export interface ColumnFlags {
   primary?: boolean;
   nullable?: boolean;
   default?: unknown;
+  /** Auto-incrementing column (Postgres serial/identity, MySQL AUTO_INCREMENT, SQLite AUTOINCREMENT). */
+  autoincrement?: boolean;
   index?: IndexDef;
 }
 
@@ -33,6 +35,11 @@ export class Column<TOut, TNullable extends boolean = false> {
 
   default(v: TOut): Column<TOut, TNullable> {
     return new Column(this.name, this.type, { ...this.flags, default: v });
+  }
+
+  /** Mark the column as auto-incrementing (its value is assigned by the DB). */
+  autoincrement(): Column<TOut, TNullable> {
+    return new Column(this.name, this.type, { ...this.flags, autoincrement: true });
   }
 
   index(name: string): Column<TOut, TNullable> {

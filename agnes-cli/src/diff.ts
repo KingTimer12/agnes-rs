@@ -22,7 +22,12 @@ function byName<T extends { name: string }>(items: T[]): Map<string, T> {
 }
 
 function columnChanged(a: ColumnIR, b: ColumnIR): boolean {
-  return a.type !== b.type || a.nullable !== b.nullable || a.primary !== b.primary;
+  return (
+    a.type !== b.type ||
+    a.nullable !== b.nullable ||
+    a.primary !== b.primary ||
+    !!a.autoincrement !== !!b.autoincrement
+  );
 }
 
 /**

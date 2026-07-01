@@ -11,6 +11,8 @@ export interface ColumnIR {
   primary: boolean;
   /** default value as a literal; undefined = no default. */
   default?: unknown;
+  /** DB assigns the value (serial/identity/AUTO_INCREMENT). Mutually exclusive with `default`. */
+  autoincrement?: boolean;
 }
 
 export interface IndexIR {
@@ -59,6 +61,7 @@ interface DslColumn {
     primary?: boolean;
     nullable?: boolean;
     default?: unknown;
+    autoincrement?: boolean;
     index?: { name: string; unique: boolean };
   };
 }
@@ -115,12 +118,15 @@ export function schemaToIR(schema: DslSchema): DatabaseIR {
     for (const fieldKey in def) {
       const field = def[fieldKey]!;
       if (field._kind === "column") {
+        const autoincrement = field.flags.autoincrement ?? false;
         columns.push({
           name: field.name,
           type: field.type,
           nullable: field.flags.nullable ?? false,
           primary: field.flags.primary ?? false,
-          default: field.flags.default,
+          // Auto-increment supplies the value; never emit an explicit default too.
+          default: autoincrement ? undefined : field.flags.default,
+          autoincrement,
         });
         if (field.flags.index) {
           indexes.push({

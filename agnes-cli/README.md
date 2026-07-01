@@ -92,6 +92,11 @@ schema/
   index.ts   ← import { schema } from "./schema"
 ```
 
+**Defaults & auto-increment.** `pull` renders defaults in the column's type
+(`bool("x").default(true)`, `int("n").default(1)` — not strings). Serial /
+identity / `AUTO_INCREMENT` columns become `.autoincrement()`, and SQL
+expressions that can't be a literal (e.g. `CURRENT_TIMESTAMP`) are omitted.
+
 ### `migrate` — versioned SQL files
 
 1. Diffs schema vs DB and, if there's drift, writes a timestamped file to

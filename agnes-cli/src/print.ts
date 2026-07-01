@@ -25,10 +25,42 @@ function onAction(rule: string): string {
   return ON_ACTION[rule.toUpperCase()] ?? "OnAction.None";
 }
 
-function literal(v: unknown): string {
-  if (typeof v === "boolean") return String(v);
-  if (typeof v === "number" || typeof v === "bigint") return String(v);
-  return JSON.stringify(String(v));
+/**
+ * Render a raw DB default into the `.default(...)` argument for a given column
+ * type, or `null` to omit it. Introspection hands us raw strings ("true", "1",
+ * "'x'::text", "CURRENT_TIMESTAMP"); we coerce them to the type the DSL expects
+ * and drop SQL expressions we can't represent as a literal.
+ */
+function renderDefault(type: ColumnType, raw: unknown): string | null {
+  if (raw === undefined || raw === null) return null;
+  const s = String(raw).trim();
+  // Strip a trailing type cast: 'x'::text, 5::integer, 'a'::character varying.
+  const cast = s.replace(/::[\w\s"]+$/, "").trim();
+  const quoted = cast.match(/^'([\s\S]*)'$/);
+  const inner = quoted ? quoted[1]!.replace(/''/g, "'") : undefined;
+  const scalar = inner ?? cast;
+
+  switch (type) {
+    case "bool": {
+      const t = scalar.toLowerCase();
+      if (t === "true" || t === "t" || t === "1") return "true";
+      if (t === "false" || t === "f" || t === "0") return "false";
+      return null;
+    }
+    case "int":
+    case "float": {
+      const n = Number(scalar);
+      return scalar !== "" && Number.isFinite(n) ? String(n) : null;
+    }
+    case "bigint":
+      return /^-?\d+$/.test(scalar) ? `${scalar}n` : null;
+    case "text":
+    case "json":
+      // Only string literals; skip expressions (CURRENT_TIMESTAMP, now(), …).
+      return inner !== undefined ? JSON.stringify(inner) : null;
+    default:
+      return null; // bytes
+  }
 }
 
 /** A qualified name → a valid JS identifier (for the `schema` object keys / relation keys). */
@@ -45,7 +77,12 @@ function tableSource(t: TableIR): string {
     let expr = `${HELPER[col.type]}(${JSON.stringify(col.name)})`;
     if (col.primary) expr += ".primary()";
     else if (col.nullable) expr += ".nullable()";
-    if (col.default !== undefined) expr += `.default(${literal(col.default)})`;
+    if (col.autoincrement) {
+      expr += ".autoincrement()";
+    } else {
+      const d = renderDefault(col.type, col.default);
+      if (d !== null) expr += `.default(${d})`;
+    }
     for (const idx of t.indexes) {
       if (idx.columns.length === 1 && idx.columns[0] === col.name) {
         expr += idx.unique

@@ -64,13 +64,19 @@ async function introspectPostgres(db: QueryClient, schemas: string[]): Promise<D
       );
       const pkSet = new Set(pks.map((r) => str(r.column_name)));
 
-      const columns: ColumnIR[] = cols.map((c) => ({
-        name: str(c.column_name),
-        type: logicalType(str(c.data_type)),
-        nullable: str(c.is_nullable) === "YES",
-        primary: pkSet.has(str(c.column_name)),
-        default: c.column_default == null ? undefined : str(c.column_default),
-      }));
+      const columns: ColumnIR[] = cols.map((c) => {
+        const rawDefault = c.column_default == null ? undefined : str(c.column_default);
+        // serial/identity columns default to nextval(...) — surface them as autoincrement.
+        const autoincrement = rawDefault != null && /nextval\(/i.test(rawDefault);
+        return {
+          name: str(c.column_name),
+          type: logicalType(str(c.data_type)),
+          nullable: str(c.is_nullable) === "YES",
+          primary: pkSet.has(str(c.column_name)),
+          default: autoincrement ? undefined : rawDefault,
+          autoincrement,
+        };
+      });
 
       const idxRows = await db.query<Row>(
         `SELECT i.relname AS index_name, a.attname AS column_name,
