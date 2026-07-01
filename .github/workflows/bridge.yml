@@ -223,7 +223,7 @@ jobs:
       - name: Publish platform packages
         if: steps.version.outputs.publish == 'true'
         working-directory: agnes-bridge
-        run: bunx napi pre-publish -t npm
+        run: bunx napi pre-publish -t npm --no-gh-release
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
