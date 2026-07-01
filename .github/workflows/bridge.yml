@@ -181,6 +181,12 @@ jobs:
         with:
           path: agnes-bridge/artifacts
 
+      # Generate the npm/<platform>/ dirs (+ package.json) that `napi artifacts`
+      # writes the .node files into. They aren't committed to the repo.
+      - name: Create npm platform dirs
+        run: bunx napi create-npm-dirs
+        working-directory: agnes-bridge
+
       - name: Move artifacts into npm platform dirs
         run: bun run artifacts
         working-directory: agnes-bridge
