@@ -10,10 +10,15 @@
       "import": "./dist/index.js"
     }
   },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "build": "bun build src/index.ts --outdir dist --format esm --minify --external agnes-bridge && bunx tsc -p tsconfig.build.json",
     "typecheck": "bunx tsc --noEmit",
-    "test": "bun test"
+    "test": "bun test",
+    "prepublishOnly": "bun run build"
   },
   "type": "module",
   "devDependencies": {

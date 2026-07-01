@@ -11,6 +11,12 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "files": [
+    "src",
+    "bin",
+    "agnes.config.example.ts",
+    "README.md"
+  ],
   "scripts": {
     "agnes": "bun bin/agnes.ts",
     "typecheck": "bunx tsc --noEmit",
