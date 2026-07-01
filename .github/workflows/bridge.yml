@@ -2,15 +2,11 @@ name: Bridge (native addon)
 
 on:
   push:
+    # Tags trigger the publish job. Tag pushes must NOT be path-filtered
+    # (GitHub evaluates `paths` for tags too and would skip the release).
+    tags:
+      - "v*"
     branches: [main, master]
-    paths:
-      - "agnes-bridge/**"
-      - "agnes-core/**"
-      - "agnes-cache/**"
-      - "agnes-adapter-*/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - ".github/workflows/bridge.yml"
   pull_request:
     paths:
       - "agnes-bridge/**"
