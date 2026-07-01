@@ -88,7 +88,8 @@ interface DslTableEntry {
   tableName: string;
 }
 
-export type DslSchema = Record<string, DslTableEntry>;
+/** Entries may sit at the top level or be grouped one level deep by DB schema. */
+export type DslSchema = Record<string, DslTableEntry | Record<string, DslTableEntry>>;
 
 function fkName(table: string, column: string): string {
   return `fk_${table}_${column}`;
@@ -100,16 +101,47 @@ function colName(def: Record<string, DslField>, key: string): string | undefined
   return f && f._kind === "column" ? f.name : undefined;
 }
 
+function isTableEntry(v: unknown): v is DslTableEntry {
+  return (
+    typeof v === "object" &&
+    v !== null &&
+    typeof (v as DslTableEntry).tableName === "string" &&
+    typeof (v as DslTableEntry).def === "object"
+  );
+}
+
+/** Flatten nested groups; pair each entry with its path key ("grp.tbl" or "tbl"). */
+function flattenDsl(schema: DslSchema): { key: string; entry: DslTableEntry }[] {
+  const out: { key: string; entry: DslTableEntry }[] = [];
+  for (const k in schema) {
+    const v = schema[k];
+    if (isTableEntry(v)) {
+      out.push({ key: k, entry: v });
+    } else if (v && typeof v === "object") {
+      for (const p in v as Record<string, DslTableEntry>) {
+        const e = (v as Record<string, DslTableEntry>)[p];
+        if (isTableEntry(e)) out.push({ key: `${k}.${p}`, entry: e });
+      }
+    }
+  }
+  return out;
+}
+
 /** Convert the user's schema DSL into the canonical DatabaseIR. */
 export function schemaToIR(schema: DslSchema): DatabaseIR {
-  // Map DSL table key → physical name for relation resolution.
-  const physicalName = new Map<string, string>();
-  for (const key in schema) physicalName.set(key, schema[key]!.tableName);
+  const entries = flattenDsl(schema);
+
+  // A relation target may reference either the TS path key or the physical
+  // table name — index by both so both hand-written and pulled schemas resolve.
+  const byRef = new Map<string, DslTableEntry>();
+  for (const { key, entry } of entries) {
+    byRef.set(key, entry);
+    byRef.set(entry.tableName, entry);
+  }
 
   const ir: DatabaseIR = {};
 
-  for (const key in schema) {
-    const entry = schema[key]!;
+  for (const { entry } of entries) {
     const def = entry.def;
     const columns: ColumnIR[] = [];
     const indexes: IndexIR[] = [];
@@ -137,9 +169,9 @@ export function schemaToIR(schema: DslSchema): DatabaseIR {
         }
       } else if (field._kind === "one") {
         const localCol = colName(def, field.localKey);
-        const targetDef = schema[field.target]?.def;
-        const refCol = targetDef ? colName(targetDef, field.targetKey) : undefined;
-        const refTable = physicalName.get(field.target);
+        const targetEntry = byRef.get(field.target);
+        const refCol = targetEntry ? colName(targetEntry.def, field.targetKey) : undefined;
+        const refTable = targetEntry?.tableName;
         if (localCol && refCol && refTable) {
           foreignKeys.push({
             name: fkName(entry.tableName, localCol),

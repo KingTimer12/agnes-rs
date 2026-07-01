@@ -68,10 +68,23 @@ function idKey(name: string): string {
   return name.replace(/[^A-Za-z0-9_]/g, "_");
 }
 
-function tableSource(t: TableIR): string {
+/** Render the `table({...}, "physical")` expression. `pad` indents column lines. */
+function tableBody(t: TableIR, pad: string): string {
   const physical = qualifiedName(t.name, t.schema);
   const fkByColumn = new Map(t.foreignKeys.map((fk) => [fk.column, fk]));
   const lines: string[] = [];
+
+  // Relation keys must be unique and not collide with column keys. Derive from
+  // the local FK column (dropping a trailing _id) so two FKs to the same table
+  // (e.g. decisor_etapa_sim_id / _nao_id) get distinct, readable keys.
+  const usedKeys = new Set(t.columns.map((c) => c.name));
+  const relKeyFor = (fk: { column: string; refTable: string }): string => {
+    const base = idKey(fk.column.replace(/_?id$/i, "")) || idKey(fk.refTable);
+    let key = base;
+    for (let n = 2; usedKeys.has(key); n++) key = `${base}_${n}`;
+    usedKeys.add(key);
+    return key;
+  };
 
   for (const col of t.columns) {
     let expr = `${HELPER[col.type]}(${JSON.stringify(col.name)})`;
@@ -90,28 +103,54 @@ function tableSource(t: TableIR): string {
           : `.index(${JSON.stringify(idx.name)})`;
       }
     }
-    lines.push(`    ${col.name}: ${expr},`);
+    lines.push(`${pad}  ${col.name}: ${expr},`);
   }
 
   for (const fk of fkByColumn.values()) {
-    // Relation TS key: derive from referenced table (best effort).
-    const relKey = idKey(fk.refTable);
+    const relKey = relKeyFor(fk);
     lines.push(
-      `    ${relKey}: one(${JSON.stringify(fk.refTable)}, ${JSON.stringify(fk.column)}, ` +
+      `${pad}  ${relKey}: one(${JSON.stringify(fk.refTable)}, ${JSON.stringify(fk.column)}, ` +
         `${JSON.stringify(fk.refColumn)}, ${onAction(fk.onUpdate)}, ${onAction(fk.onDelete)}),`,
     );
   }
 
-  return `  ${idKey(physical)}: table({\n${lines.join("\n")}\n  }, ${JSON.stringify(physical)}),`;
+  return `table({\n${lines.join("\n")}\n${pad}}, ${JSON.stringify(physical)})`;
+}
+
+const byQualified = (a: TableIR, b: TableIR) =>
+  qualifiedName(a.name, a.schema).localeCompare(qualifiedName(b.name, b.schema));
+
+/**
+ * Render the `{ ... }` body of `export const schema`. Default-schema tables sit
+ * at the top level (`users: table(...)`); tables from other schemas are grouped
+ * one level deep (`legislativo: { etapas: table(...) }`), which flattens to the
+ * dotted key `legislativo.etapas` — matching each table's physical name.
+ */
+function schemaObject(tables: TableIR[]): string {
+  const top: TableIR[] = [];
+  const groups = new Map<string, TableIR[]>();
+  for (const t of tables) {
+    if (!t.schema || t.schema === "public") top.push(t);
+    else (groups.get(t.schema) ?? groups.set(t.schema, []).get(t.schema)!).push(t);
+  }
+
+  const lines: string[] = [];
+  for (const t of top.sort(byQualified)) {
+    lines.push(`  ${idKey(t.name)}: ${tableBody(t, "  ")},`);
+  }
+  for (const schema of [...groups.keys()].sort()) {
+    const inner = groups
+      .get(schema)!
+      .sort(byQualified)
+      .map((t) => `    ${idKey(t.name)}: ${tableBody(t, "    ")},`)
+      .join("\n");
+    lines.push(`  ${idKey(schema)}: {\n${inner}\n  },`);
+  }
+  return `export const schema = {\n${lines.join("\n")}\n};\n`;
 }
 
 function schemaBlock(tables: TableIR[]): string {
-  const body = tables
-    .slice()
-    .sort((a, b) => qualifiedName(a.name, a.schema).localeCompare(qualifiedName(b.name, b.schema)))
-    .map(tableSource)
-    .join("\n");
-  return `export const schema = {\n${body}\n};\n`;
+  return schemaObject(tables);
 }
 
 /** Render a full DatabaseIR into a single schema.ts source string. */

@@ -82,6 +82,21 @@ outside `public` get qualified physical names (`table(def, "auth.users")`):
 schemas: ["public", "auth", "billing"],
 ```
 
+Non-`public` tables are grouped one level deep by schema; `public` tables stay
+at the top level. The group flattens to a dotted key you select by:
+
+```ts
+export const schema = {
+  users: table({ /* … */ }, "users"),          // public → top level
+  legislativo: {                                // grouped by schema
+    etapas: table({ /* … */ }, "legislativo.etapas"),
+  },
+};
+
+db.select("users");
+db.select("legislativo.etapas");   // dotted key = <schema>.<table>
+```
+
 With `pullMode: "multifile"`, `pull` writes one file per DB schema plus an
 `index.ts` that merges them into a single `schema` export — `out` is then a
 directory:

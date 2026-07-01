@@ -124,7 +124,48 @@ export function table<T extends TableDef>(def: T, tableName: string): TableEntry
   return new TableEntry(def, tableName);
 }
 
+/** Flat schema: table key → entry. Relation targets reference these keys. */
 export type Schema = Record<string, TableEntry<TableDef>>;
+
+/**
+ * What the user may pass to `AgnesClient.create` / `defineConfig`: entries may
+ * sit at the top level (`users`) or be grouped one level deep by DB schema
+ * (`legislativo: { etapas }`). Grouped entries flatten to dotted keys
+ * (`legislativo.etapas`) that match their physical name and relation targets.
+ */
+export type NestedSchema = Record<string, TableEntry<TableDef> | Record<string, TableEntry<TableDef>>>;
+
+type UnionToIntersection<U> = (U extends unknown ? (k: U) => void : never) extends (k: infer I) => void
+  ? I
+  : never;
+
+/** Type-level flatten of a NestedSchema into a flat {@link Schema}. */
+export type FlattenSchema<S> = UnionToIntersection<
+  {
+    [K in keyof S]: S[K] extends TableEntry<TableDef>
+      ? Record<K & string, S[K]>
+      : S[K] extends Record<string, TableEntry<TableDef>>
+        ? { [P in keyof S[K] as `${K & string}.${P & string}`]: S[K][P] }
+        : never;
+  }[keyof S]
+> & {};
+
+/** Runtime counterpart of {@link FlattenSchema}: collapse groups to dotted keys. */
+export function flattenSchema(schema: NestedSchema): Schema {
+  const out: Record<string, TableEntry<TableDef>> = {};
+  for (const k in schema) {
+    const v = schema[k];
+    if (v instanceof TableEntry) {
+      out[k] = v;
+    } else if (v) {
+      for (const p in v) {
+        const entry = (v as Record<string, TableEntry<TableDef>>)[p];
+        if (entry) out[`${k}.${p}`] = entry;
+      }
+    }
+  }
+  return out;
+}
 
 // ─── Column helpers ───────────────────────────────────────────────────────────
 

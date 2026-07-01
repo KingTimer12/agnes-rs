@@ -1,5 +1,13 @@
 import { connectRust, type DatabaseConfig, type QueryOpts, type RustDatabase } from "./bridge";
-import type { Schema, TableDef, InferRow, TableEntry } from "./schema";
+import {
+  flattenSchema,
+  type FlattenSchema,
+  type NestedSchema,
+  type Schema,
+  type TableDef,
+  type InferRow,
+  type TableEntry,
+} from "./schema";
 import type { Dialect } from "./query/builder";
 import { SelectBuilder, InsertBuilder, UpdateBuilder, DeleteBuilder } from "./query/builder";
 
@@ -10,9 +18,16 @@ export class AgnesClient<S extends Schema> {
     private readonly dialect: Dialect,
   ) {}
 
-  static async create<S extends Schema>(config: DatabaseConfig, schema: S): Promise<AgnesClient<S>> {
+  static async create<I extends NestedSchema>(
+    config: DatabaseConfig,
+    schema: I,
+  ): Promise<AgnesClient<FlattenSchema<I>>> {
     const rust = await connectRust(config);
-    return new AgnesClient(rust, schema, config.driver);
+    return new AgnesClient(
+      rust,
+      flattenSchema(schema) as FlattenSchema<I>,
+      config.driver,
+    );
   }
 
   select<K extends keyof S & string>(table: K): SelectBuilder<S[K] extends TableEntry<infer D> ? D : never, S> {
