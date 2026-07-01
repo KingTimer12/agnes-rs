@@ -204,7 +204,7 @@ jobs:
             VERSION="$INPUT_VERSION"
             npm pkg set version="$VERSION"
           else
-            VERSION="$(npm pkg get version | tr -d '\"')"
+            VERSION="$(node -p "require('./package.json').version")"
           fi
           case "$VERSION" in
             [0-9]*.[0-9]*.[0-9]*) ;;
