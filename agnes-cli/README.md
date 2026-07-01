@@ -27,6 +27,7 @@ export default defineConfig({
   url: process.env.DATABASE_URL!,
   schema,
 
+  stripTimezone: false,        // return timestamps as naive ISO (no tz offset)
   schemas: ["public"],         // PostgreSQL schemas to introspect (default: public)
   pullMode: "singlefile",      // "singlefile" | "multifile"
   out: "./schema.ts",          // where `pull` writes (a directory in multifile mode)
@@ -142,6 +143,14 @@ export const db = await AgnesClient.create(
 bun agnes generate                       # uses config.output
 bun agnes generate --output src/db.js    # override; JS output
 ```
+
+## Timezones
+
+Set `stripTimezone: true` (config, or `stripTimezone` on `AgnesClient.create`)
+to get temporal columns back as **naive ISO strings** with no offset —
+`"2026-07-01T12:00:00"` instead of `"2026-07-01T12:00:00+00:00"`. This sidesteps
+the classic footgun where `new Date(value)` shifts the wall-clock time by the
+runtime's local offset. Postgres only; MySQL/SQLite values are already naive.
 
 ## Options
 

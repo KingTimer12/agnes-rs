@@ -17,6 +17,11 @@ export interface DatabaseConfig {
   url: string
   maxConnections?: number
   cache?: CacheConfig
+  /**
+   * Return temporal values without a timezone offset (naive wall-clock ISO).
+   * Avoids the JS `Date` tz-shift footgun. Postgres only; defaults to false.
+   */
+  stripTimezone?: boolean
 }
 
 export interface QueryOpts {

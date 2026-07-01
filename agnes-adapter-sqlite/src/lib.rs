@@ -15,7 +15,9 @@ pub struct SqliteAdapter {
 }
 
 impl SqliteAdapter {
-    pub async fn connect(url: &str, max_connections: u32) -> Result<Self> {
+    // `_strip_tz` is accepted for a uniform adapter API; SQLite stores temporal
+    // values as TEXT/INTEGER with no timezone, so there is nothing to strip.
+    pub async fn connect(url: &str, max_connections: u32, _strip_tz: bool) -> Result<Self> {
         let opts = SqliteConnectOptions::from_str(url)
             .map_err(|e| AgnesError::Adapter(e.to_string()))?
             .create_if_missing(true);

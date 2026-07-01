@@ -38,6 +38,9 @@ export default defineConfig({
   url: process.env.DATABASE_URL ?? "postgres://user:pass@localhost/db",
   schema,
 
+  // Return timestamps as naive ISO (no offset) to avoid the JS Date tz shift.
+  stripTimezone: false,
+
   // PostgreSQL schemas to introspect (default: ["public"]). Tables outside the
   // default schema get qualified physical names, e.g. table(def, "auth.users").
   schemas: ["public"],

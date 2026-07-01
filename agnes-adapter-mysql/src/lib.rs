@@ -11,20 +11,24 @@ mod row_ref;
 
 pub struct MySqlAdapter {
     pool: MySqlPool,
+    strip_tz: bool,
 }
 
 impl MySqlAdapter {
-    pub async fn connect(url: &str, max_connections: u32) -> Result<Self> {
+    pub async fn connect(url: &str, max_connections: u32, strip_tz: bool) -> Result<Self> {
         let pool = MySqlPoolOptions::new()
             .max_connections(max_connections.max(1))
             .connect(url)
             .await
             .map_err(|e| AgnesError::Adapter(e.to_string()))?;
-        Ok(Self { pool })
+        Ok(Self { pool, strip_tz })
     }
 
     pub fn from_pool(pool: MySqlPool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            strip_tz: false,
+        }
     }
 }
 
@@ -36,7 +40,15 @@ impl DatabaseAdapter for MySqlAdapter {
             .fetch_all(&self.pool)
             .await
             .map_err(|e| AgnesError::Adapter(e.to_string()))?;
-        rows.iter().map(|row| MySqlRowRef(row).try_into()).collect()
+        rows.iter()
+            .map(|row| {
+                MySqlRowRef {
+                    row,
+                    strip_tz: self.strip_tz,
+                }
+                .try_into()
+            })
+            .collect()
     }
 
     async fn execute(&self, sql: &str, params: &[Value]) -> Result<u64> {

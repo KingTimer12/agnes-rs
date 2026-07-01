@@ -14,6 +14,7 @@ export async function openDb(config: AgnesConfig): Promise<CliDb> {
       driver: config.driver,
       url: config.url,
       maxConnections: config.maxConnections,
+      stripTimezone: config.stripTimezone,
     },
     config.schema as never,
   );

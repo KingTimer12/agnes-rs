@@ -29,6 +29,8 @@ function renderConfigObject(config: AgnesConfig): string {
   ];
   if (config.maxConnections !== undefined)
     lines.push(`    maxConnections: ${config.maxConnections},`);
+  if (config.stripTimezone !== undefined)
+    lines.push(`    stripTimezone: ${config.stripTimezone},`);
   if (config.cache) {
     const parts = [`enabled: ${config.cache.enabled}`];
     if (config.cache.walPath !== undefined) parts.push(`walPath: ${JSON.stringify(config.cache.walPath)}`);

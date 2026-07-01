@@ -23,6 +23,9 @@ pub struct DatabaseConfig {
   pub url: String,
   pub max_connections: Option<u32>,
   pub cache: Option<CacheConfig>,
+  /// Return temporal values without a timezone offset (naive wall-clock ISO).
+  /// Avoids the JS `Date` tz-shift footgun. Postgres only; defaults to false.
+  pub strip_timezone: Option<bool>,
 }
 
 #[napi(object)]
@@ -49,20 +52,21 @@ impl Database {
   #[napi(factory)]
   pub async fn connect(config: DatabaseConfig) -> Result<Database> {
     let max = config.max_connections.unwrap_or(10);
+    let strip_tz = config.strip_timezone.unwrap_or(false);
 
     let adapter: Arc<dyn DatabaseAdapter> = match config.driver.to_ascii_lowercase().as_str() {
       "postgres" | "postgresql" | "pg" => Arc::new(
-        PostgresAdapter::connect(&config.url, max)
+        PostgresAdapter::connect(&config.url, max, strip_tz)
           .await
           .map_err(to_napi)?,
       ),
       "mysql" | "mariadb" => Arc::new(
-        MySqlAdapter::connect(&config.url, max)
+        MySqlAdapter::connect(&config.url, max, strip_tz)
           .await
           .map_err(to_napi)?,
       ),
       "sqlite" => Arc::new(
-        SqliteAdapter::connect(&config.url, max)
+        SqliteAdapter::connect(&config.url, max, strip_tz)
           .await
           .map_err(to_napi)?,
       ),

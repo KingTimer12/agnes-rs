@@ -14,6 +14,13 @@ export interface DatabaseConfig {
   url: string;
   maxConnections?: number;
   cache?: CacheConfig;
+  /**
+   * Return temporal values (timestamp/date/time) without a timezone offset —
+   * naive wall-clock ISO strings like `2026-07-01T12:00:00`. Avoids the JS
+   * `Date` timezone-shift footgun (the classic Prisma problem). Postgres only;
+   * defaults to false. SQLite/MySQL values are already naive.
+   */
+  stripTimezone?: boolean;
 }
 
 export interface QueryOpts {

@@ -20,6 +20,10 @@ export default defineConfig({
   // The schema object exported from your schema.ts.
   schema,
 
+  // Return timestamps without a timezone offset (naive ISO, e.g. 2026-07-01T12:00:00).
+  // Avoids the JS Date tz-shift footgun (the classic Prisma problem). Postgres only.
+  stripTimezone: false,
+
   // ── pull / push ──────────────────────────────────────────────────────────
   // PostgreSQL schemas to introspect. "public" is the default; add more to
   // pull/push tables that live outside it (they get qualified names, "auth.users").
