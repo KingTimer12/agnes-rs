@@ -1,0 +1,27 @@
+{
+  "name": "agnes-library",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "bun build src/index.ts --outdir dist --format esm --minify --external agnes-bridge && bunx tsc -p tsconfig.build.json",
+    "typecheck": "bunx tsc --noEmit",
+    "test": "bun test"
+  },
+  "type": "module",
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "agnes-bridge": "workspace:*"
+  }
+}

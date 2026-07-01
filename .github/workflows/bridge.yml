@@ -1,0 +1,153 @@
+name: Bridge (native addon)
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "agnes-bridge/**"
+      - "agnes-core/**"
+      - "agnes-cache/**"
+      - "agnes-adapter-*/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/bridge.yml"
+  pull_request:
+    paths:
+      - "agnes-bridge/**"
+      - "agnes-core/**"
+      - "agnes-cache/**"
+      - "agnes-adapter-*/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/bridge.yml"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish (e.g. 0.1.0), without the leading v"
+        required: true
+
+concurrency:
+  group: bridge-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Disable husky git hooks during CI installs.
+  HUSKY: 0
+
+defaults:
+  run:
+    working-directory: agnes-bridge
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    runs-on: ${{ matrix.host }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - host: macos-latest
+            target: aarch64-apple-darwin
+          - host: macos-latest
+            target: x86_64-apple-darwin
+          - host: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - host: windows-latest
+            target: x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Enable corepack (yarn)
+        run: corepack enable
+        working-directory: .
+
+      - name: Install dependencies
+        run: yarn install --immutable
+
+      - name: Build
+        run: yarn build --target ${{ matrix.target }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings-${{ matrix.target }}
+          path: agnes-bridge/*.node
+          if-no-files-found: error
+
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    needs: build
+    # Only publish on a version tag or an explicit dispatch.
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    environment: npm
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Enable corepack (yarn)
+        run: corepack enable
+        working-directory: .
+
+      - name: Install dependencies
+        run: yarn install --immutable
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: agnes-bridge/artifacts
+
+      - name: Move artifacts into npm platform dirs
+        run: yarn artifacts
+
+      - name: Resolve version
+        id: version
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          if [ -n "$INPUT_VERSION" ]; then
+            VERSION="$INPUT_VERSION"
+          else
+            VERSION="${REF_NAME#v}"
+          fi
+          case "$VERSION" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "Invalid version: $VERSION" >&2; exit 1 ;;
+          esac
+          echo "value=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Set package version
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: npm pkg set version="$VERSION"
+
+      # `npm publish` runs the `prepublishOnly` hook (`napi prepublish -t npm`),
+      # which publishes the per-platform packages and rewrites optionalDependencies,
+      # then publishes the main agnes-bridge package.
+      - name: Publish
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

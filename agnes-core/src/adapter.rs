@@ -1,0 +1,50 @@
+use async_trait::async_trait;
+
+use crate::error::Result;
+use crate::types::{Rows, Value};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Dialect {
+    Postgres,
+    MySql,
+    Sqlite,
+}
+
+pub trait RowRef<T>: TryFrom<T> {
+    fn decode(&self, i: usize, ty: &str) -> Result<serde_json::Value>;
+}
+
+#[async_trait]
+pub trait DatabaseAdapter: Send + Sync {
+    async fn query(&self, sql: &str, params: &[Value]) -> Result<Rows>;
+    async fn execute(&self, sql: &str, params: &[Value]) -> Result<u64>;
+    fn dialect(&self) -> Dialect;
+}
+
+pub trait DatabaseBind {
+    fn bind<'q, D>(
+        mut q: sqlx::query::Query<'q, D, <D as sqlx::Database>::Arguments<'q>>,
+        params: &'q [Value],
+    ) -> sqlx::query::Query<'q, D, <D as sqlx::Database>::Arguments<'q>>
+    where
+        D: sqlx::Database,
+        bool: sqlx::Encode<'q, D> + sqlx::Type<D>,
+        i64: sqlx::Encode<'q, D> + sqlx::Type<D>,
+        Option<i64>: sqlx::Encode<'q, D> + sqlx::Type<D>,
+        f64: sqlx::Encode<'q, D> + sqlx::Type<D>,
+        String: sqlx::Encode<'q, D> + sqlx::Type<D>,
+        Vec<u8>: sqlx::Encode<'q, D> + sqlx::Type<D>,
+    {
+        for p in params {
+            q = match p {
+                Value::Null => q.bind::<Option<i64>>(None),
+                Value::Bool(b) => q.bind(*b),
+                Value::Int(i) => q.bind(*i),
+                Value::Float(f) => q.bind(*f),
+                Value::Text(s) => q.bind(s.clone()),
+                Value::Bytes(b) => q.bind(b.clone()),
+            };
+        }
+        q
+    }
+}

@@ -1,0 +1,137 @@
+import { defaultLiteral, ident, physicalType, type Dialect } from "./dialect";
+import type { ColumnIR, ForeignKeyIR, TableIR } from "./ir";
+import type { Operation } from "./diff";
+
+function columnDef(dialect: Dialect, col: ColumnIR): string {
+  let s = `${ident(dialect, col.name)} ${physicalType(dialect, col.type)}`;
+  if (col.primary) s += " PRIMARY KEY";
+  if (!col.nullable && !col.primary) s += " NOT NULL";
+  if (col.default !== undefined) s += ` DEFAULT ${defaultLiteral(dialect, col.default)}`;
+  return s;
+}
+
+function fkClause(dialect: Dialect, fk: ForeignKeyIR): string {
+  return (
+    `CONSTRAINT ${ident(dialect, fk.name)} FOREIGN KEY (${ident(dialect, fk.column)}) ` +
+    `REFERENCES ${ident(dialect, fk.refTable)} (${ident(dialect, fk.refColumn)}) ` +
+    `ON UPDATE ${fk.onUpdate} ON DELETE ${fk.onDelete}`
+  );
+}
+
+function createTable(dialect: Dialect, t: TableIR): string {
+  const lines = t.columns.map((c) => `  ${columnDef(dialect, c)}`);
+  // SQLite can only declare FKs inline at table-create time.
+  if (dialect === "sqlite") {
+    for (const fk of t.foreignKeys) lines.push(`  ${fkClause(dialect, fk)}`);
+  }
+  return `CREATE TABLE ${ident(dialect, t.name)} (\n${lines.join(",\n")}\n);`;
+}
+
+function createIndex(dialect: Dialect, table: string, name: string, cols: string[], unique: boolean): string {
+  const u = unique ? "UNIQUE " : "";
+  const colList = cols.map((c) => ident(dialect, c)).join(", ");
+  return `CREATE ${u}INDEX ${ident(dialect, name)} ON ${ident(dialect, table)} (${colList});`;
+}
+
+/**
+ * Render one operation into zero or more SQL statements for `dialect`.
+ * Emits `-- SKIPPED` comments for operations a dialect can't express (e.g.
+ * SQLite ALTER limitations) instead of producing invalid SQL.
+ */
+export function renderOperation(dialect: Dialect, op: Operation): string[] {
+  const t = (name: string) => ident(dialect, name);
+
+  switch (op.kind) {
+    case "createTable": {
+      const out = [createTable(dialect, op.table)];
+      for (const idx of op.table.indexes)
+        out.push(createIndex(dialect, op.table.name, idx.name, idx.columns, idx.unique));
+      // Non-SQLite: add FKs after create (SQLite already inlined them).
+      if (dialect !== "sqlite")
+        for (const fk of op.table.foreignKeys)
+          out.push(`ALTER TABLE ${t(op.table.name)} ADD ${fkClause(dialect, fk)};`);
+      return out;
+    }
+
+    case "dropTable":
+      return [`DROP TABLE ${t(op.table)};`];
+
+    case "addColumn":
+      return [`ALTER TABLE ${t(op.table)} ADD COLUMN ${columnDef(dialect, op.column)};`];
+
+    case "dropColumn":
+      return [`ALTER TABLE ${t(op.table)} DROP COLUMN ${t(op.column)};`];
+
+    case "alterColumn": {
+      if (dialect === "sqlite")
+        return [`-- SKIPPED: SQLite cannot ALTER column ${op.table}.${op.to.name}; recreate the table manually.`];
+      if (dialect === "postgres") {
+        const col = t(op.to.name);
+        const type = physicalType(dialect, op.to.type);
+        const out = [
+          `ALTER TABLE ${t(op.table)} ALTER COLUMN ${col} TYPE ${type} USING ${col}::${type};`,
+        ];
+        out.push(
+          `ALTER TABLE ${t(op.table)} ALTER COLUMN ${col} ${op.to.nullable ? "DROP NOT NULL" : "SET NOT NULL"};`,
+        );
+        return out;
+      }
+      // mysql
+      const nullSql = op.to.nullable ? "NULL" : "NOT NULL";
+      return [
+        `ALTER TABLE ${t(op.table)} MODIFY COLUMN ${columnDef(dialect, op.to).replace(/ PRIMARY KEY/, "")} ${op.to.primary ? "" : nullSql};`,
+      ];
+    }
+
+    case "createIndex":
+      return [createIndex(dialect, op.table, op.index.name, op.index.columns, op.index.unique)];
+
+    case "dropIndex":
+      // MySQL scopes index names to the table; others are global.
+      return dialect === "mysql"
+        ? [`DROP INDEX ${t(op.index)} ON ${t(op.table)};`]
+        : [`DROP INDEX ${t(op.index)};`];
+
+    case "addForeignKey": {
+      if (dialect === "sqlite")
+        return [`-- SKIPPED: SQLite cannot add FK ${op.fk.name} after table creation.`];
+      return [`ALTER TABLE ${t(op.table)} ADD ${fkClause(dialect, op.fk)};`];
+    }
+
+    case "dropForeignKey": {
+      if (dialect === "sqlite")
+        return [`-- SKIPPED: SQLite cannot drop FK ${op.fk}.`];
+      if (dialect === "mysql") return [`ALTER TABLE ${t(op.table)} DROP FOREIGN KEY ${t(op.fk)};`];
+      return [`ALTER TABLE ${t(op.table)} DROP CONSTRAINT ${t(op.fk)};`];
+    }
+  }
+}
+
+/** Render a full operation list into a flat SQL statement array. */
+export function renderPlan(dialect: Dialect, ops: Operation[]): string[] {
+  return ops.flatMap((op) => renderOperation(dialect, op));
+}
+
+/** Human-readable one-line summary of an operation (for confirmation prompts). */
+export function describeOperation(op: Operation): string {
+  switch (op.kind) {
+    case "createTable":
+      return `+ create table ${op.table.name}`;
+    case "dropTable":
+      return `- DROP TABLE ${op.table}  (destructive)`;
+    case "addColumn":
+      return `+ add column ${op.table}.${op.column.name}`;
+    case "dropColumn":
+      return `- DROP COLUMN ${op.table}.${op.column}  (destructive)`;
+    case "alterColumn":
+      return `~ alter column ${op.table}.${op.to.name}`;
+    case "createIndex":
+      return `+ create index ${op.index.name} on ${op.table}`;
+    case "dropIndex":
+      return `- drop index ${op.index}`;
+    case "addForeignKey":
+      return `+ add fk ${op.fk.name} on ${op.table}`;
+    case "dropForeignKey":
+      return `- drop fk ${op.fk} on ${op.table}`;
+  }
+}

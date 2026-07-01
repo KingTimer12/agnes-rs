@@ -1,0 +1,28 @@
+{
+  "name": "agnes-cli",
+  "version": "0.0.1",
+  "description": "Schema migration CLI for agnes-rs — push, pull and migrate from schema.ts",
+  "type": "module",
+  "bin": {
+    "agnes": "./bin/agnes.ts"
+  },
+  "main": "src/index.ts",
+  "module": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "agnes": "bun bin/agnes.ts",
+    "typecheck": "bunx tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "agnes-library": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}

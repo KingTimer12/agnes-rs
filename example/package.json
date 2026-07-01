@@ -1,0 +1,20 @@
+{
+  "name": "example",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "agnes": "agnes"
+  },
+  "dependencies": {
+    "agnes-library": "workspace:*",
+    "agnes-cli": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}
