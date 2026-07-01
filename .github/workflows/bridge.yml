@@ -210,6 +210,7 @@ jobs:
             [0-9]*.[0-9]*.[0-9]*) ;;
             *) echo "Invalid version: $VERSION" >&2; exit 1 ;;
           esac
+          echo "value=$VERSION" >> "$GITHUB_OUTPUT"
           if npm view "agnes-bridge@$VERSION" version >/dev/null 2>&1; then
             echo "agnes-bridge@$VERSION already published — skipping."
             echo "publish=false" >> "$GITHUB_OUTPUT"
@@ -238,9 +239,17 @@ jobs:
 
       # Now that agnes-bridge@<version> is on npm, cut the GitHub release.
       # Its `release: published` event triggers the agnes-library / agnes-cli publish.
+      # Decoupled from `publish`: even if the bridge was already on npm (so we
+      # skipped publishing), we still create the release when it's missing — so a
+      # half-finished run (bridge published but release never cut) self-heals on
+      # the next push instead of leaving library/cli stuck on the old version.
       - name: Create GitHub release
-        if: steps.version.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.version.outputs.value }}
-        run: gh release create "v$VERSION" --title "v$VERSION" --notes "Release v$VERSION" --target "$GITHUB_SHA"
+        run: |
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "Release v$VERSION already exists — nothing to do."
+            exit 0
+          fi
+          gh release create "v$VERSION" --title "v$VERSION" --notes "Release v$VERSION" --target "$GITHUB_SHA"
