@@ -28,6 +28,6 @@
     "typescript": "^5"
   },
   "dependencies": {
-    "agnes-bridge": "workspace:*"
+    "agnes-bridge": "workspace:^"
   }
 }

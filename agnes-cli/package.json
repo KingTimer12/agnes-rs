@@ -23,7 +23,7 @@
     "test": "bun test"
   },
   "dependencies": {
-    "agnes-library": "workspace:*"
+    "agnes-library": "workspace:^"
   },
   "devDependencies": {
     "@types/bun": "latest"
