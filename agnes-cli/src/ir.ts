@@ -30,14 +30,22 @@ export interface ForeignKeyIR {
 }
 
 export interface TableIR {
+  /** Physical table name (unqualified). */
   name: string;
+  /** Owning DB schema. `undefined`/"public" = default schema. */
+  schema?: string;
   columns: ColumnIR[];
   indexes: IndexIR[];
   foreignKeys: ForeignKeyIR[];
 }
 
-/** Keyed by physical table name. */
+/** Keyed by qualified name (see {@link qualifiedName}). */
 export type DatabaseIR = Record<string, TableIR>;
+
+/** IR key / physical reference: `table` in the default schema, else `schema.table`. */
+export function qualifiedName(name: string, schema?: string): string {
+  return !schema || schema === "public" ? name : `${schema}.${name}`;
+}
 
 // ─── Structural view of the schema DSL ──────────────────────────────────────
 // We treat the schema object duck-typed (via `_kind`) so the CLI never has to
@@ -140,7 +148,17 @@ export function schemaToIR(schema: DslSchema): DatabaseIR {
       // `many` relations have no physical footprint — the FK lives on the target side.
     }
 
-    ir[entry.tableName] = { name: entry.tableName, columns, indexes, foreignKeys };
+    // A dotted physical name ("auth.users") carries an explicit schema.
+    const dot = entry.tableName.indexOf(".");
+    const tblSchema = dot === -1 ? undefined : entry.tableName.slice(0, dot);
+    const bare = dot === -1 ? entry.tableName : entry.tableName.slice(dot + 1);
+    ir[qualifiedName(bare, tblSchema)] = {
+      name: bare,
+      schema: tblSchema,
+      columns,
+      indexes,
+      foreignKeys,
+    };
   }
 
   return ir;

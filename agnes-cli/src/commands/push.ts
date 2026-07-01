@@ -18,7 +18,7 @@ export async function push(config: AgnesConfig, args: PushArgs): Promise<void> {
   const db = await openDb(config);
 
   const desired = normalizeIR(schemaToIR(config.schema), config.driver);
-  const current = normalizeIR(await introspect(db, config.driver), config.driver);
+  const current = normalizeIR(await introspect(db, config.driver, config.schemas), config.driver);
   const ops = diffSchemas(desired, current);
 
   await applyPlan(db, config.driver, ops, args);

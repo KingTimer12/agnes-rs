@@ -15,8 +15,20 @@ export interface AgnesConfig {
   url: string;
   /** The schema object exported from your schema.ts (`export const schema = {...}`). */
   schema: DslSchema;
-  /** Where `pull` writes the generated schema (default: ./schema.ts). */
+  /** Where `pull` writes the generated schema (default: ./schema.ts).
+   * In `multifile` mode this is treated as a directory (default: ./schema). */
   out?: string;
+  /**
+   * PostgreSQL schemas to introspect on `pull`/`push` (default: `["public"]`).
+   * Tables outside the default schema get qualified physical names ("auth.users").
+   */
+  schemas?: string[];
+  /**
+   * How `pull` lays out the generated schema:
+   *  - "singlefile" (default): every table in one file.
+   *  - "multifile": one file per DB schema + an index re-exporting them merged.
+   */
+  pullMode?: "singlefile" | "multifile";
   /** Directory for versioned migration files (default: ./migrations). */
   migrationsDir?: string;
   maxConnections?: number;
@@ -28,6 +40,12 @@ export interface AgnesConfig {
    * e.g. "src/services/db.ts" or "db.js".
    */
   output?: string;
+  /**
+   * Env var holding the connection URL. When set, `agnes generate` emits
+   * `process.env[urlEnv]` in the client instead of inlining the literal URL —
+   * so credentials stay in your .env and never land in the generated file.
+   */
+  urlEnv?: string;
   /**
    * Module that exports `schema`, imported by the generated client.
    * Default: `out` (the pull target) or "./schema". A filesystem path

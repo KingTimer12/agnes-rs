@@ -171,7 +171,7 @@ await db.insertInto("post").values({ userId: 1, content: "Hello!" });
 
 ## Status
 
-Early (`0.0.4`). APIs may change. Contributions welcome.
+Early (`0.0.5`). APIs may change. Contributions welcome.
 
 ## License
 

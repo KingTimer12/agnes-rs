@@ -15,7 +15,8 @@ bun add agnes-cli agnes-library
 
 ## Configure
 
-Create `agnes.config.ts` in your project root (see `agnes.config.example.ts`):
+Run `bun agnes init` to scaffold `agnes.config.ts`, or create it yourself
+(see `agnes.config.example.ts`):
 
 ```ts
 import { defineConfig } from "agnes-cli";
@@ -25,11 +26,15 @@ export default defineConfig({
   driver: "postgres",
   url: process.env.DATABASE_URL!,
   schema,
-  out: "./schema.ts",          // where `pull` writes
+
+  schemas: ["public"],         // PostgreSQL schemas to introspect (default: public)
+  pullMode: "singlefile",      // "singlefile" | "multifile"
+  out: "./schema.ts",          // where `pull` writes (a directory in multifile mode)
   migrationsDir: "./migrations",
 
   // `generate` output — extension picks the language (.ts or .js)
   output: "src/services/db.ts",
+  urlEnv: "DATABASE_URL",      // `generate` reads the URL from here (keeps it out of the file)
   schemaPath: "./schema.ts",   // module the generated client imports `schema` from
   cache: { enabled: true, walPath: ".agnes/cache.wal" },
 });
@@ -38,6 +43,7 @@ export default defineConfig({
 ## Commands
 
 ```bash
+bun agnes init        # scaffold agnes.config.ts
 bun agnes push        # make the DB match schema.ts (create/alter/DROP)
 bun agnes pull        # regenerate schema.ts from the live DB
 bun agnes migrate     # write a versioned .sql from drift, then apply pending
@@ -68,6 +74,24 @@ Prompts before overwriting an existing file unless `--yes`.
 bun agnes pull --out src/schema.ts
 ```
 
+**Multi-schema (PostgreSQL).** List the schemas you want in `schemas` — tables
+outside `public` get qualified physical names (`table(def, "auth.users")`):
+
+```ts
+schemas: ["public", "auth", "billing"],
+```
+
+With `pullMode: "multifile"`, `pull` writes one file per DB schema plus an
+`index.ts` that merges them into a single `schema` export — `out` is then a
+directory:
+
+```
+schema/
+  public.ts
+  auth.ts
+  index.ts   ← import { schema } from "./schema"
+```
+
 ### `migrate` — versioned SQL files
 
 1. Diffs schema vs DB and, if there's drift, writes a timestamped file to
@@ -95,7 +119,7 @@ import { schema } from "../../schema";
 export const db = await AgnesClient.create(
   {
     driver: "sqlite",
-    url: "sqlite:./demo.db",
+    url: process.env["DATABASE_URL"]!,
     cache: { enabled: true, walPath: ".agnes/cache.wal" },
   },
   schema,
@@ -105,6 +129,9 @@ export const db = await AgnesClient.create(
 - `output` (config) or `--output` picks the path. `.ts` → TypeScript, `.js` → JavaScript.
 - The `import { schema }` path is made relative to the output file automatically.
 - The `cache` block is emitted only if you set `cache` in the config.
+- **Secrets stay out of the file:** set `urlEnv` (e.g. `"DATABASE_URL"`) and the
+  client reads `process.env[urlEnv]` at runtime instead of inlining the URL.
+  Without `urlEnv`, `generate` warns and inlines the literal `url`.
 
 ```bash
 bun agnes generate                       # uses config.output
@@ -116,7 +143,7 @@ bun agnes generate --output src/db.js    # override; JS output
 | Flag | Applies to | Meaning |
 |------|-----------|---------|
 | `-c, --config <path>` | all | Config file (default `agnes.config.ts`) |
-| `-o, --out <path>` | pull | Output schema file |
+| `-o, --out <path>` | init, pull | Config path (init) / output schema file or dir (pull) |
 | `--output <path>` | generate | Output client module (.ts/.js) |
 | `--dir <path>` | migrate | Migrations directory |
 | `-n, --name <name>` | migrate | Name for the generated migration |

@@ -15,10 +15,17 @@ function toImportSpecifier(fromFile: string, toModule: string): string {
   return rel;
 }
 
+function renderUrl(config: AgnesConfig): string {
+  // Never inline credentials: when urlEnv is set, read the URL from the
+  // environment at runtime so the generated file stays secret-free.
+  if (config.urlEnv) return `process.env[${JSON.stringify(config.urlEnv)}]!`;
+  return JSON.stringify(config.url);
+}
+
 function renderConfigObject(config: AgnesConfig): string {
   const lines: string[] = [
     `    driver: ${JSON.stringify(config.driver)},`,
-    `    url: ${JSON.stringify(config.url)},`,
+    `    url: ${renderUrl(config)},`,
   ];
   if (config.maxConnections !== undefined)
     lines.push(`    maxConnections: ${config.maxConnections},`);
@@ -56,6 +63,15 @@ export async function generate(config: AgnesConfig, args: GenerateArgs): Promise
   const outPath = resolve(process.cwd(), outRel);
   const schemaFsPath = resolve(process.cwd(), config.schemaPath ?? config.out ?? "schema.ts");
   const schemaImport = toImportSpecifier(outPath, schemaFsPath);
+
+  if (!config.urlEnv) {
+    console.log(
+      c.yellow(
+        `⚠ config.urlEnv is not set — the connection URL will be INLINED into ${outRel}.`,
+      ),
+    );
+    console.log(c.dim(`  Set urlEnv (e.g. "DATABASE_URL") to read it from the environment instead.`));
+  }
 
   const source = renderClient(config, schemaImport);
 

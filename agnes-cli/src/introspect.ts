@@ -1,5 +1,5 @@
 import { logicalType, type Dialect } from "./dialect";
-import type { ColumnIR, DatabaseIR, ForeignKeyIR, IndexIR, TableIR } from "./ir";
+import { qualifiedName, type ColumnIR, type DatabaseIR, type ForeignKeyIR, type IndexIR, type TableIR } from "./ir";
 
 // Minimal DB surface the CLI needs — satisfied by AgnesClient.
 export interface QueryClient {
@@ -17,10 +17,14 @@ function isInternal(name: string): boolean {
   return name.startsWith("_agnes") || name.startsWith("sqlite_");
 }
 
-export async function introspect(db: QueryClient, dialect: Dialect): Promise<DatabaseIR> {
+export async function introspect(
+  db: QueryClient,
+  dialect: Dialect,
+  schemas?: string[],
+): Promise<DatabaseIR> {
   switch (dialect) {
     case "postgres":
-      return introspectPostgres(db);
+      return introspectPostgres(db, schemas && schemas.length ? schemas : ["public"]);
     case "mysql":
       return introspectMysql(db);
     case "sqlite":
@@ -30,81 +34,87 @@ export async function introspect(db: QueryClient, dialect: Dialect): Promise<Dat
 
 // ─── PostgreSQL ─────────────────────────────────────────────────────────────
 
-async function introspectPostgres(db: QueryClient): Promise<DatabaseIR> {
+async function introspectPostgres(db: QueryClient, schemas: string[]): Promise<DatabaseIR> {
   const ir: DatabaseIR = {};
-  const tables = await db.query<Row>(
-    `SELECT table_name FROM information_schema.tables
-     WHERE table_schema = 'public' AND table_type = 'BASE TABLE'`,
-  );
 
-  for (const tr of tables) {
-    const name = str(tr.table_name);
-    if (isInternal(name)) continue;
-
-    const cols = await db.query<Row>(
-      `SELECT column_name, data_type, is_nullable, column_default
-       FROM information_schema.columns
-       WHERE table_schema = 'public' AND table_name = $1
-       ORDER BY ordinal_position`,
-      [name],
-    );
-    const pks = await db.query<Row>(
-      `SELECT kcu.column_name FROM information_schema.table_constraints tc
-       JOIN information_schema.key_column_usage kcu
-         ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
-       WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_name = $1 AND tc.table_schema = 'public'`,
-      [name],
-    );
-    const pkSet = new Set(pks.map((r) => str(r.column_name)));
-
-    const columns: ColumnIR[] = cols.map((c) => ({
-      name: str(c.column_name),
-      type: logicalType(str(c.data_type)),
-      nullable: str(c.is_nullable) === "YES",
-      primary: pkSet.has(str(c.column_name)),
-      default: c.column_default == null ? undefined : str(c.column_default),
-    }));
-
-    const idxRows = await db.query<Row>(
-      `SELECT i.relname AS index_name, a.attname AS column_name,
-              ix.indisunique AS is_unique, ix.indisprimary AS is_primary
-       FROM pg_class t
-       JOIN pg_index ix ON t.oid = ix.indrelid
-       JOIN pg_class i ON i.oid = ix.indexrelid
-       JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(ix.indkey)
-       WHERE t.relname = $1 AND t.relkind = 'r'`,
-      [name],
-    );
-    const indexes = groupIndexes(
-      idxRows
-        .filter((r) => !truthy(r.is_primary))
-        .map((r) => ({ index: str(r.index_name), column: str(r.column_name), unique: truthy(r.is_unique) })),
+  for (const schema of schemas) {
+    const tables = await db.query<Row>(
+      `SELECT table_name FROM information_schema.tables
+       WHERE table_schema = $1 AND table_type = 'BASE TABLE'`,
+      [schema],
     );
 
-    const fkRows = await db.query<Row>(
-      `SELECT tc.constraint_name, kcu.column_name,
-              ccu.table_name AS foreign_table, ccu.column_name AS foreign_column,
-              rc.update_rule, rc.delete_rule
-       FROM information_schema.table_constraints tc
-       JOIN information_schema.key_column_usage kcu
-         ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
-       JOIN information_schema.constraint_column_usage ccu
-         ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
-       JOIN information_schema.referential_constraints rc
-         ON rc.constraint_name = tc.constraint_name AND rc.constraint_schema = tc.table_schema
-       WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_name = $1 AND tc.table_schema = 'public'`,
-      [name],
-    );
-    const foreignKeys: ForeignKeyIR[] = fkRows.map((r) => ({
-      name: str(r.constraint_name),
-      column: str(r.column_name),
-      refTable: str(r.foreign_table),
-      refColumn: str(r.foreign_column),
-      onUpdate: str(r.update_rule).toUpperCase(),
-      onDelete: str(r.delete_rule).toUpperCase(),
-    }));
+    for (const tr of tables) {
+      const name = str(tr.table_name);
+      if (isInternal(name)) continue;
 
-    ir[name] = { name, columns, indexes, foreignKeys };
+      const cols = await db.query<Row>(
+        `SELECT column_name, data_type, is_nullable, column_default
+         FROM information_schema.columns
+         WHERE table_schema = $1 AND table_name = $2
+         ORDER BY ordinal_position`,
+        [schema, name],
+      );
+      const pks = await db.query<Row>(
+        `SELECT kcu.column_name FROM information_schema.table_constraints tc
+         JOIN information_schema.key_column_usage kcu
+           ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
+         WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_name = $2 AND tc.table_schema = $1`,
+        [schema, name],
+      );
+      const pkSet = new Set(pks.map((r) => str(r.column_name)));
+
+      const columns: ColumnIR[] = cols.map((c) => ({
+        name: str(c.column_name),
+        type: logicalType(str(c.data_type)),
+        nullable: str(c.is_nullable) === "YES",
+        primary: pkSet.has(str(c.column_name)),
+        default: c.column_default == null ? undefined : str(c.column_default),
+      }));
+
+      const idxRows = await db.query<Row>(
+        `SELECT i.relname AS index_name, a.attname AS column_name,
+                ix.indisunique AS is_unique, ix.indisprimary AS is_primary
+         FROM pg_class t
+         JOIN pg_namespace n ON n.oid = t.relnamespace
+         JOIN pg_index ix ON t.oid = ix.indrelid
+         JOIN pg_class i ON i.oid = ix.indexrelid
+         JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(ix.indkey)
+         WHERE t.relname = $2 AND n.nspname = $1 AND t.relkind = 'r'`,
+        [schema, name],
+      );
+      const indexes = groupIndexes(
+        idxRows
+          .filter((r) => !truthy(r.is_primary))
+          .map((r) => ({ index: str(r.index_name), column: str(r.column_name), unique: truthy(r.is_unique) })),
+      );
+
+      const fkRows = await db.query<Row>(
+        `SELECT tc.constraint_name, kcu.column_name,
+                ccu.table_schema AS foreign_schema, ccu.table_name AS foreign_table,
+                ccu.column_name AS foreign_column, rc.update_rule, rc.delete_rule
+         FROM information_schema.table_constraints tc
+         JOIN information_schema.key_column_usage kcu
+           ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
+         JOIN information_schema.constraint_column_usage ccu
+           ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
+         JOIN information_schema.referential_constraints rc
+           ON rc.constraint_name = tc.constraint_name AND rc.constraint_schema = tc.table_schema
+         WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_name = $2 AND tc.table_schema = $1`,
+        [schema, name],
+      );
+      const foreignKeys: ForeignKeyIR[] = fkRows.map((r) => ({
+        name: str(r.constraint_name),
+        column: str(r.column_name),
+        refTable: qualifiedName(str(r.foreign_table), str(r.foreign_schema)),
+        refColumn: str(r.foreign_column),
+        onUpdate: str(r.update_rule).toUpperCase(),
+        onDelete: str(r.delete_rule).toUpperCase(),
+      }));
+
+      const s = schema === "public" ? undefined : schema;
+      ir[qualifiedName(name, s)] = { name, schema: s, columns, indexes, foreignKeys };
+    }
   }
   return ir;
 }

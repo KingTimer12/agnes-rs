@@ -1,5 +1,5 @@
 import { defaultLiteral, ident, physicalType, type Dialect } from "./dialect";
-import type { ColumnIR, ForeignKeyIR, TableIR } from "./ir";
+import { qualifiedName, type ColumnIR, type ForeignKeyIR, type TableIR } from "./ir";
 import type { Operation } from "./diff";
 
 function columnDef(dialect: Dialect, col: ColumnIR): string {
@@ -24,7 +24,7 @@ function createTable(dialect: Dialect, t: TableIR): string {
   if (dialect === "sqlite") {
     for (const fk of t.foreignKeys) lines.push(`  ${fkClause(dialect, fk)}`);
   }
-  return `CREATE TABLE ${ident(dialect, t.name)} (\n${lines.join(",\n")}\n);`;
+  return `CREATE TABLE ${ident(dialect, qualifiedName(t.name, t.schema))} (\n${lines.join(",\n")}\n);`;
 }
 
 function createIndex(dialect: Dialect, table: string, name: string, cols: string[], unique: boolean): string {
@@ -43,13 +43,14 @@ export function renderOperation(dialect: Dialect, op: Operation): string[] {
 
   switch (op.kind) {
     case "createTable": {
+      const qn = qualifiedName(op.table.name, op.table.schema);
       const out = [createTable(dialect, op.table)];
       for (const idx of op.table.indexes)
-        out.push(createIndex(dialect, op.table.name, idx.name, idx.columns, idx.unique));
+        out.push(createIndex(dialect, qn, idx.name, idx.columns, idx.unique));
       // Non-SQLite: add FKs after create (SQLite already inlined them).
       if (dialect !== "sqlite")
         for (const fk of op.table.foreignKeys)
-          out.push(`ALTER TABLE ${t(op.table.name)} ADD ${fkClause(dialect, fk)};`);
+          out.push(`ALTER TABLE ${t(qn)} ADD ${fkClause(dialect, fk)};`);
       return out;
     }
 

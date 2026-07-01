@@ -1,4 +1,5 @@
 import { loadConfig } from "./config";
+import { init } from "./commands/init";
 import { push } from "./commands/push";
 import { pull } from "./commands/pull";
 import { migrate } from "./commands/migrate";
@@ -59,6 +60,7 @@ ${c.bold("Usage:")}
   agnes <command> [options]
 
 ${c.bold("Commands:")}
+  init       Scaffold an agnes.config.ts in the current directory
   push       Sync the database to match schema.ts (create/alter/drop)
   pull       Introspect the database and (re)generate schema.ts
   migrate    Generate a versioned SQL migration from drift, then apply pending
@@ -85,6 +87,12 @@ export async function run(argv: string[]): Promise<void> {
   }
 
   try {
+    // `init` runs without an existing config.
+    if (command === "init") {
+      await init({ out: flags.out, yes: flags.yes });
+      return;
+    }
+
     const config = await loadConfig(flags.config);
     switch (command) {
       case "push":

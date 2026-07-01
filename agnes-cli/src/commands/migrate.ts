@@ -62,7 +62,7 @@ export async function migrate(config: AgnesConfig, args: MigrateArgs): Promise<v
 
   // 1. Detect drift and write a new migration file.
   const desired = normalizeIR(schemaToIR(config.schema), config.driver);
-  const current = normalizeIR(await introspect(db, config.driver), config.driver);
+  const current = normalizeIR(await introspect(db, config.driver, config.schemas), config.driver);
   const ops = diffSchemas(desired, current);
 
   if (ops.length > 0) {
