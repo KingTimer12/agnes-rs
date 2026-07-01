@@ -54,7 +54,10 @@ pub enum QueryKind {
 
 impl QueryKind {
     pub fn is_mutation(&self) -> bool {
-        matches!(self, QueryKind::Insert | QueryKind::Update | QueryKind::Delete)
+        matches!(
+            self,
+            QueryKind::Insert | QueryKind::Update | QueryKind::Delete
+        )
     }
 }
 

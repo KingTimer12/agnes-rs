@@ -74,10 +74,10 @@ impl Database {
     let cache: Option<Arc<dyn CacheBackend>> = match config.cache {
       Some(c) if c.enabled => {
         let wal_path: Option<std::path::PathBuf> = c.wal_path.map(Into::into);
-        if let Some(p) = &wal_path {
-          if let Some(dir) = p.parent() {
-            std::fs::create_dir_all(dir).map_err(to_napi)?;
-          }
+        if let Some(p) = &wal_path
+          && let Some(dir) = p.parent()
+        {
+          std::fs::create_dir_all(dir).map_err(to_napi)?;
         }
         let kv = KvMotor::new(KvConfig {
           wal_path,

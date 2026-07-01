@@ -15,10 +15,10 @@ pub struct Wal {
 impl Wal {
     pub fn open(path: impl AsRef<Path>) -> std::io::Result<Self> {
         let path = path.as_ref().to_path_buf();
-        if let Some(parent) = path.parent() {
-            if !parent.as_os_str().is_empty() {
-                std::fs::create_dir_all(parent)?;
-            }
+        if let Some(parent) = path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(parent)?;
         }
         let file = OpenOptions::new()
             .create(true)
@@ -87,7 +87,10 @@ impl Wal {
             w.flush()?;
         }
         std::fs::rename(&tmp, &self.path)?;
-        let file = OpenOptions::new().read(true).append(true).open(&self.path)?;
+        let file = OpenOptions::new()
+            .read(true)
+            .append(true)
+            .open(&self.path)?;
         self.writer = BufWriter::new(file);
         self.entries_written = records.len() as u64;
         Ok(())

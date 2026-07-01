@@ -24,24 +24,24 @@ impl Executor {
             .clone()
             .unwrap_or_else(|| cache_key(sql, params));
 
-        if let Some(cache) = &self.cache {
-            if !opts.bypass_cache && parsed.kind == QueryKind::Select {
-                if let Some(bytes) = cache.get(&key).await? {
-                    if let Ok(rows) = serde_json::from_slice::<Rows>(&bytes) {
-                        return Ok(rows);
-                    }
-                }
-            }
+        if let Some(cache) = &self.cache
+            && !opts.bypass_cache
+            && parsed.kind == QueryKind::Select
+            && let Some(bytes) = cache.get(&key).await?
+            && let Ok(rows) = serde_json::from_slice::<Rows>(&bytes)
+        {
+            return Ok(rows);
         }
 
         let rows = self.adapter.query(sql, params).await?;
 
-        if let Some(cache) = &self.cache {
-            if !opts.bypass_cache && parsed.kind == QueryKind::Select {
-                let tags: Vec<String> = parsed.tables.iter().map(|t| tag_for_table(t)).collect();
-                let bytes = serde_json::to_vec(&rows)?;
-                cache.set(&key, bytes, opts.ttl_secs, &tags).await?;
-            }
+        if let Some(cache) = &self.cache
+            && !opts.bypass_cache
+            && parsed.kind == QueryKind::Select
+        {
+            let tags: Vec<String> = parsed.tables.iter().map(|t| tag_for_table(t)).collect();
+            let bytes = serde_json::to_vec(&rows)?;
+            cache.set(&key, bytes, opts.ttl_secs, &tags).await?;
         }
 
         Ok(rows)
@@ -51,12 +51,12 @@ impl Executor {
         let parsed = parse(sql)?;
         let affected = self.adapter.execute(sql, params).await?;
 
-        if let Some(cache) = &self.cache {
-            if parsed.kind.is_mutation() && !parsed.tables.is_empty() {
-                let tags: Vec<String> =
-                    parsed.tables.iter().map(|t| tag_for_table(t)).collect();
-                cache.invalidate_tags(&tags).await?;
-            }
+        if let Some(cache) = &self.cache
+            && parsed.kind.is_mutation()
+            && !parsed.tables.is_empty()
+        {
+            let tags: Vec<String> = parsed.tables.iter().map(|t| tag_for_table(t)).collect();
+            cache.invalidate_tags(&tags).await?;
         }
         Ok(affected)
     }

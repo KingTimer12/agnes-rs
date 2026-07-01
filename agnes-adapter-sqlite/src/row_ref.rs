@@ -28,7 +28,7 @@ impl<'a> RowRef<SqliteRowRef<'a>> for SqliteRowRef<'a> {
 
             "BOOLEAN" => row
                 .try_get::<bool, _>(i)
-                .map(|n| J::Bool(n.into()))
+                .map(J::Bool)
                 .map_err(|e| AgnesError::Adapter(e.to_string())),
 
             "REAL" | "FLOAT" | "DOUBLE" => row

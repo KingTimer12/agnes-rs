@@ -112,11 +112,9 @@ impl Inner {
             }
         }
 
-        if log {
-            if let Some(w) = &mut self.wal {
-                let _ = w.append(rec);
-                self.maybe_compact();
-            }
+        if log && let Some(w) = &mut self.wal {
+            let _ = w.append(rec);
+            self.maybe_compact();
         }
     }
 
@@ -163,11 +161,7 @@ impl CacheBackend for KvMotor {
         tokio::task::spawn_blocking(move || {
             let now = KvMotor::now();
             let mut g = inner.lock();
-            let expired = g
-                .map
-                .get(&key)
-                .map(|e| e.is_expired(now))
-                .unwrap_or(false);
+            let expired = g.map.get(&key).map(|e| e.is_expired(now)).unwrap_or(false);
             if expired {
                 g.apply(&WalRecord::Delete { key: key.clone() }, true);
                 return Ok(None);

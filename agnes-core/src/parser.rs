@@ -1,6 +1,4 @@
-use sqlparser::ast::{
-    Delete, FromTable, Insert, SetExpr, Statement, TableFactor, TableWithJoins,
-};
+use sqlparser::ast::{Delete, FromTable, Insert, SetExpr, Statement, TableFactor, TableWithJoins};
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 
@@ -8,8 +6,8 @@ use crate::error::{AgnesError, Result};
 use crate::types::{ParsedQuery, QueryKind};
 
 pub fn parse(sql: &str) -> Result<ParsedQuery> {
-    let stmts = Parser::parse_sql(&GenericDialect, sql)
-        .map_err(|e| AgnesError::Parse(e.to_string()))?;
+    let stmts =
+        Parser::parse_sql(&GenericDialect, sql).map_err(|e| AgnesError::Parse(e.to_string()))?;
     let stmt = stmts
         .first()
         .ok_or_else(|| AgnesError::Parse("empty statement".into()))?;
@@ -90,7 +88,8 @@ mod tests {
 
     #[test]
     fn select_tables() {
-        let p = parse("SELECT * FROM users u JOIN posts p ON p.uid = u.id WHERE u.age > $1").unwrap();
+        let p =
+            parse("SELECT * FROM users u JOIN posts p ON p.uid = u.id WHERE u.age > $1").unwrap();
         assert_eq!(p.kind, QueryKind::Select);
         assert!(p.tables.contains(&"users".to_string()));
         assert!(p.tables.contains(&"posts".to_string()));
