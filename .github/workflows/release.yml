@@ -64,23 +64,17 @@ jobs:
         working-directory: agnes-cli
         run: bun run typecheck
 
-      - name: Configure npm auth
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
-
       # Publish agnes-library first — agnes-cli depends on it.
-      # `bun publish` rewrites `workspace:*` deps to the concrete version.
+      # `bun publish` reads NPM_CONFIG_TOKEN and rewrites `workspace:*` deps to
+      # the concrete version.
       - name: Publish agnes-library
         working-directory: agnes-library
         run: bun publish --access public
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish agnes-cli
         working-directory: agnes-cli
         run: bun publish --access public
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
