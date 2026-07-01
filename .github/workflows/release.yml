@@ -47,12 +47,33 @@ jobs:
           esac
           echo "value=$VERSION" >> "$GITHUB_OUTPUT"
 
+      # Pin every package (incl. agnes-bridge) to the released version so the
+      # `workspace:*` deps get rewritten to that exact version on publish:
+      #   agnes-cli@V → agnes-library@V → agnes-bridge@V
       - name: Set package versions
         env:
           VERSION: ${{ steps.version.outputs.value }}
         run: |
+          (cd agnes-bridge && npm pkg set version="$VERSION")
           (cd agnes-library && npm pkg set version="$VERSION")
           (cd agnes-cli && npm pkg set version="$VERSION")
+
+      # The bridge workflow publishes agnes-bridge@V before cutting the release,
+      # but wait to be certain it's on npm so the published deps resolve.
+      - name: Wait for agnes-bridge on npm
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          for i in $(seq 1 30); do
+            if npm view "agnes-bridge@$VERSION" version >/dev/null 2>&1; then
+              echo "agnes-bridge@$VERSION is available."
+              exit 0
+            fi
+            echo "Waiting for agnes-bridge@$VERSION on npm ($i/30)…"
+            sleep 10
+          done
+          echo "agnes-bridge@$VERSION never appeared on npm." >&2
+          exit 1
 
       - name: Typecheck & build agnes-library
         working-directory: agnes-library

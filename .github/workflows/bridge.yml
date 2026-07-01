@@ -218,13 +218,13 @@ jobs:
             echo "publish=true" >> "$GITHUB_OUTPUT"
           fi
 
-      # `napi pre-publish` publishes the per-platform packages, rewrites
-      # optionalDependencies, and creates a GitHub release (tag v<version>).
-      # That release event triggers the agnes-library / agnes-cli publish.
-      - name: Publish platform packages + create GitHub release
+      # Publish the per-platform packages + rewrite optionalDependencies.
+      # NO GitHub release here — we create it last, after the main package is
+      # fully on npm, so agnes-library/cli only build against a bridge that exists.
+      - name: Publish platform packages
         if: steps.version.outputs.publish == 'true'
         working-directory: agnes-bridge
-        run: bunx napi pre-publish -t npm
+        run: bunx napi pre-publish -t npm --no-gh-release
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -235,3 +235,12 @@ jobs:
         run: bun publish --access public --ignore-scripts
         env:
           NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # Now that agnes-bridge@<version> is on npm, cut the GitHub release.
+      # Its `release: published` event triggers the agnes-library / agnes-cli publish.
+      - name: Create GitHub release
+        if: steps.version.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.value }}
+        run: gh release create "v$VERSION" --title "v$VERSION" --notes "Release v$VERSION" --target "$GITHUB_SHA"
