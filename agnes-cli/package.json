@@ -1,6 +1,6 @@
 {
   "name": "agnes-cli",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "description": "Schema migration CLI for agnes-rs — push, pull and migrate from schema.ts",
   "type": "module",
   "bin": {
