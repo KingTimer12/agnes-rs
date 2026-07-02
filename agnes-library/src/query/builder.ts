@@ -19,7 +19,9 @@ function placeholder(dialect: Dialect, n: number): string {
 }
 
 function ident(dialect: Dialect, name: string): string {
-  return dialect === "mysql" ? `\`${name}\`` : `"${name}"`;
+  const q = (p: string) => (dialect === "mysql" ? `\`${p}\`` : `"${p}"`);
+  // Qualified table refs ("IBGE.tabela") quote each part separately.
+  return name.includes(".") ? name.split(".").map(q).join(".") : q(name);
 }
 
 export type WhereOp = "=" | "!=" | ">" | ">=" | "<" | "<=" | "like" | "in";
