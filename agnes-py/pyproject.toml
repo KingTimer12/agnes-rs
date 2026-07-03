@@ -1,0 +1,26 @@
+[build-system]
+requires = ["maturin>=1.13,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "agnes-library"
+description = "Type-hinted database toolkit with a Rust core and a self-invalidating query cache"
+readme = "README.md"
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy",
+    "Topic :: Database",
+    "Topic :: Database :: Database Engines/Servers",
+]
+dynamic = ["version"]
+
+[project.urls]
+Repository = "https://github.com/KingTimer12/agnes-rs"
+
+[tool.maturin]
+# Mixed layout: pure-Python package `agnes` wraps the native `agnes._native`.
+python-source = "python"
+module-name = "agnes._native"
+features = ["pyo3/extension-module"]

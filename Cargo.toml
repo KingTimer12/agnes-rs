@@ -4,6 +4,7 @@ members = [
     "agnes-cache",
     "agnes-core",
     "agnes-bridge",
+    "agnes-py",
     "agnes-adapter-postgres",
     "agnes-adapter-mysql",
     "agnes-adapter-sqlite",

@@ -1,0 +1,73 @@
+"""agnes — type-hinted database toolkit with a Rust core and a self-invalidating cache.
+
+Python port of agnes-library (TypeScript). Same schema DSL, query builder,
+relations and cache; synchronous API.
+"""
+
+from .client import AgnesClient
+from .query import (
+    DeleteBuilder,
+    InsertBuilder,
+    SelectBuilder,
+    UpdateBuilder,
+    eq,
+    gt,
+    gte,
+    like,
+    lt,
+    lte,
+    neq,
+    on,
+    query,
+)
+from .schema import (
+    Column,
+    ManyRelation,
+    OnAction,
+    OneRelation,
+    TableEntry,
+    bigint,
+    bool_,
+    bytes_,
+    flatten_schema,
+    float_,
+    int_,
+    json_,
+    many,
+    one,
+    table,
+    text,
+)
+
+__all__ = [
+    "AgnesClient",
+    "table",
+    "int_",
+    "bigint",
+    "text",
+    "bool_",
+    "float_",
+    "bytes_",
+    "json_",
+    "one",
+    "many",
+    "OnAction",
+    "Column",
+    "TableEntry",
+    "OneRelation",
+    "ManyRelation",
+    "flatten_schema",
+    "eq",
+    "neq",
+    "gt",
+    "gte",
+    "lt",
+    "lte",
+    "like",
+    "query",
+    "on",
+    "SelectBuilder",
+    "InsertBuilder",
+    "UpdateBuilder",
+    "DeleteBuilder",
+]
