@@ -159,6 +159,23 @@ bun agnes generate                       # uses config.output
 bun agnes generate --output src/db.js    # override; JS output
 ```
 
+## Python target
+
+`pull` and `generate` can emit Python for the [`agnes`](../agnes-py) package
+instead of TypeScript. Set `lang: "py"` in the config, or give `generate` a
+`.py` output path:
+
+```ts
+lang: "py",
+out: "./schema.py",     // pull → Python DSL (schema = { ... })
+output: "./db.py",      // generate → from agnes import AgnesClient; db = AgnesClient.create(...)
+```
+
+- `pull` writes `schema.py` (singlefile) or a package dir with `__init__.py`
+  merging per-schema modules (multifile).
+- `generate` emits a Python client; `urlEnv` becomes `os.environ[...]`.
+- `push` / `migrate` still read the TypeScript `schema` from the config.
+
 ## Timezones
 
 Set `stripTimezone: true` (config, or `stripTimezone` on `AgnesClient.create`)

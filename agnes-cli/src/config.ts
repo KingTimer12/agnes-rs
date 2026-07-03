@@ -29,6 +29,14 @@ export interface AgnesConfig {
    *  - "multifile": one file per DB schema + an index re-exporting them merged.
    */
   pullMode?: "singlefile" | "multifile";
+  /**
+   * Target language emitted by `pull` (schema files) and `generate` (client):
+   *  - "ts" (default) → TypeScript, `agnes-library`
+   *  - "py"           → Python, the `agnes` package
+   * `generate` also infers "py" from a `.py` output path. Note: `push`/`migrate`
+   * still read the TypeScript `schema` from this config.
+   */
+  lang?: "ts" | "py";
   /** Directory for versioned migration files (default: ./migrations). */
   migrationsDir?: string;
   maxConnections?: number;
