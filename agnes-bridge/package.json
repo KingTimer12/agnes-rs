@@ -1,6 +1,6 @@
 {
   "name": "agnes-bridge",
-  "version": "0.0.9",
+  "version": "0.0.10",
   "description": "Template project for writing node package with napi-rs",
   "main": "index.js",
   "repository": {
