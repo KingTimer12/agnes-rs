@@ -55,17 +55,20 @@ fn options_from(opts: Option<&Bound<'_, PyDict>>) -> PyResult<QueryOptions> {
     let mut o = QueryOptions::default();
     if let Some(d) = opts {
         if let Some(v) = d.get_item("ttl")?
-            && !v.is_none() {
-                o.ttl_secs = Some(v.extract::<u64>()?);
-            }
+            && !v.is_none()
+        {
+            o.ttl_secs = Some(v.extract::<u64>()?);
+        }
         if let Some(v) = d.get_item("cache_key")?
-            && !v.is_none() {
-                o.cache_key = Some(v.extract::<String>()?);
-            }
+            && !v.is_none()
+        {
+            o.cache_key = Some(v.extract::<String>()?);
+        }
         if let Some(v) = d.get_item("bypass_cache")?
-            && !v.is_none() {
-                o.bypass_cache = v.extract::<bool>()?;
-            }
+            && !v.is_none()
+        {
+            o.bypass_cache = v.extract::<bool>()?;
+        }
     }
     Ok(o)
 }
@@ -118,9 +121,10 @@ impl Database {
                 if opt_bool(cd, "enabled")?.unwrap_or(false) {
                     let wal_path = opt_string(cd, "wal_path")?.map(std::path::PathBuf::from);
                     if let Some(p) = &wal_path
-                        && let Some(dir) = p.parent() {
-                            std::fs::create_dir_all(dir).map_err(err)?;
-                        }
+                        && let Some(dir) = p.parent()
+                    {
+                        std::fs::create_dir_all(dir).map_err(err)?;
+                    }
                     let threshold = opt_u32(cd, "compaction_threshold")?.unwrap_or(1024) as u64;
                     let kv = KvMotor::new(KvConfig {
                         wal_path,
