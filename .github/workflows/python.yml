@@ -92,6 +92,4 @@ jobs:
         uses: astral-sh/setup-uv@v5
       - name: Publish
         if: ${{ startsWith(github.ref, 'refs/tags/py-v') }}
-        run: uv publish dist/*
-        env:
-          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        run: uv publish --trusted-publishing always dist/*

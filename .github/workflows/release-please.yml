@@ -1,0 +1,48 @@
+name: Release Please
+
+# Reads conventional commits (feat/fix/…) on master and maintains a
+# "release" PR that bumps every version file. Merging that PR creates the
+# `v<version>` tag + GitHub release, which drives the existing publish chain:
+#   tag v* / release published → bridge.yml → release.yml (npm)
+# and the mirrored `py-v<version>` tag → python.yml (PyPI).
+#
+# Uses a PAT (RELEASE_TOKEN) instead of the default GITHUB_TOKEN: releases and
+# tags created with GITHUB_TOKEN do NOT trigger other workflows.
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: rp
+        with:
+          token: ${{ secrets.RELEASE_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      # Mirror the release as a `py-v<version>` tag so python.yml publishes to
+      # PyPI. Pushing with the PAT is what lets that tag trigger python.yml.
+      - uses: actions/checkout@v4
+        if: ${{ steps.rp.outputs.release_created }}
+        with:
+          token: ${{ secrets.RELEASE_TOKEN }}
+          fetch-depth: 0
+
+      - name: Push py-v tag
+        if: ${{ steps.rp.outputs.release_created }}
+        env:
+          TAG: ${{ steps.rp.outputs.tag_name }}
+        run: |
+          V="${TAG#v}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "py-v$V"
+          git push origin "py-v$V"
