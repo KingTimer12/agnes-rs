@@ -29,9 +29,19 @@ export interface QueryOpts {
   bypassCache?: boolean;
 }
 
-export interface RustDatabase {
+/** Shared surface of the DB handle and a transaction — what the builders call. */
+export interface QueryRunner {
   query(sql: string, params?: unknown[], opts?: QueryOpts): Promise<unknown>;
   mutate(sql: string, params?: unknown[]): Promise<number>;
+}
+
+export interface RustTransaction extends QueryRunner {
+  commit(): Promise<void>;
+  rollback(): Promise<void>;
+}
+
+export interface RustDatabase extends QueryRunner {
+  beginTransaction(): Promise<RustTransaction>;
 }
 
 interface RustBridge {

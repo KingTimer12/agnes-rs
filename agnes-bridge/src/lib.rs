@@ -121,6 +121,75 @@ impl Database {
     let affected = self.executor.mutate(&sql, &params).await.map_err(to_napi)?;
     Ok(affected as u32)
   }
+
+  /// Open an interactive transaction on a dedicated connection.
+  #[napi]
+  pub async fn begin_transaction(&self) -> Result<Transaction> {
+    let tx = self.executor.begin().await.map_err(to_napi)?;
+    Ok(Transaction {
+      inner: Arc::new(tokio::sync::Mutex::new(Some(tx))),
+    })
+  }
+}
+
+/// A live transaction handle. `query`/`mutate` run on the transaction's
+/// connection; `commit`/`rollback` finish it (further calls error).
+#[napi]
+pub struct Transaction {
+  inner: Arc<tokio::sync::Mutex<Option<agnes_core::executor::Transaction>>>,
+}
+
+#[napi]
+impl Transaction {
+  #[napi]
+  pub async fn query(
+    &self,
+    sql: String,
+    params: Option<Vec<serde_json::Value>>,
+    opts: Option<QueryOpts>,
+  ) -> Result<serde_json::Value> {
+    let _ = opts; // reads inside a transaction always hit the DB (no cache)
+    let params = js_values_to_params(params.unwrap_or_default());
+    let mut guard = self.inner.lock().await;
+    let tx = guard
+      .as_mut()
+      .ok_or_else(|| Error::from_reason("transaction already finished"))?;
+    let rows = tx.query(&sql, &params).await.map_err(to_napi)?;
+    Ok(rows_to_json(rows))
+  }
+
+  #[napi]
+  pub async fn mutate(&self, sql: String, params: Option<Vec<serde_json::Value>>) -> Result<u32> {
+    let params = js_values_to_params(params.unwrap_or_default());
+    let mut guard = self.inner.lock().await;
+    let tx = guard
+      .as_mut()
+      .ok_or_else(|| Error::from_reason("transaction already finished"))?;
+    let affected = tx.mutate(&sql, &params).await.map_err(to_napi)?;
+    Ok(affected as u32)
+  }
+
+  #[napi]
+  pub async fn commit(&self) -> Result<()> {
+    let tx = self
+      .inner
+      .lock()
+      .await
+      .take()
+      .ok_or_else(|| Error::from_reason("transaction already finished"))?;
+    tx.commit().await.map_err(to_napi)
+  }
+
+  #[napi]
+  pub async fn rollback(&self) -> Result<()> {
+    let tx = self
+      .inner
+      .lock()
+      .await
+      .take()
+      .ok_or_else(|| Error::from_reason("transaction already finished"))?;
+    tx.rollback().await.map_err(to_napi)
+  }
 }
 
 fn to_query_options(opts: Option<QueryOpts>) -> QueryOptions {

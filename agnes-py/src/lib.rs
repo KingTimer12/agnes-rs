@@ -6,7 +6,7 @@ use agnes_adapter_sqlite::SqliteAdapter;
 use agnes_cache::{KvConfig, KvMotor};
 use agnes_core::adapter::DatabaseAdapter;
 use agnes_core::cache::CacheBackend;
-use agnes_core::executor::Executor;
+use agnes_core::executor::{Executor, Transaction as CoreTx};
 use agnes_core::types::{QueryOptions, Value};
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyBytes, PyDict, PyList};
@@ -205,10 +205,110 @@ impl Database {
         py.detach(|| rt.block_on(async move { executor.mutate(&sql, &params).await }))
             .map_err(err)
     }
+
+    /// Open an interactive transaction on a dedicated connection.
+    fn begin_transaction(&self, py: Python<'_>) -> PyResult<Transaction> {
+        let executor = self.executor.clone();
+        let rt = self.rt.clone();
+        let tx = py
+            .detach(|| rt.block_on(async move { executor.begin().await }))
+            .map_err(err)?;
+        Ok(Transaction {
+            inner: Arc::new(tokio::sync::Mutex::new(Some(tx))),
+            rt: self.rt.clone(),
+        })
+    }
+}
+
+/// A live transaction handle. `query`/`mutate` run on the transaction's
+/// connection; `commit`/`rollback` finish it.
+#[pyclass]
+struct Transaction {
+    inner: Arc<tokio::sync::Mutex<Option<CoreTx>>>,
+    rt: Arc<Runtime>,
+}
+
+#[pymethods]
+impl Transaction {
+    #[pyo3(signature = (sql, params=None, opts=None))]
+    fn query(
+        &self,
+        py: Python<'_>,
+        sql: String,
+        params: Option<&Bound<'_, PyList>>,
+        opts: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Py<PyAny>> {
+        let _ = opts; // reads inside a transaction always hit the DB (no cache)
+        let params = params_from(params)?;
+        let inner = self.inner.clone();
+        let rt = self.rt.clone();
+        let rows = py.detach(|| {
+            rt.block_on(async move {
+                let mut guard = inner.lock().await;
+                let tx = guard
+                    .as_mut()
+                    .ok_or_else(|| err("transaction already finished"))?;
+                tx.query(&sql, &params).await.map_err(err)
+            })
+        })?;
+        Ok(pythonize(py, &rows).map_err(err)?.unbind())
+    }
+
+    #[pyo3(signature = (sql, params=None))]
+    fn mutate(
+        &self,
+        py: Python<'_>,
+        sql: String,
+        params: Option<&Bound<'_, PyList>>,
+    ) -> PyResult<u64> {
+        let params = params_from(params)?;
+        let inner = self.inner.clone();
+        let rt = self.rt.clone();
+        py.detach(|| {
+            rt.block_on(async move {
+                let mut guard = inner.lock().await;
+                let tx = guard
+                    .as_mut()
+                    .ok_or_else(|| err("transaction already finished"))?;
+                tx.mutate(&sql, &params).await.map_err(err)
+            })
+        })
+    }
+
+    fn commit(&self, py: Python<'_>) -> PyResult<()> {
+        let inner = self.inner.clone();
+        let rt = self.rt.clone();
+        py.detach(|| {
+            rt.block_on(async move {
+                let tx = inner
+                    .lock()
+                    .await
+                    .take()
+                    .ok_or_else(|| err("transaction already finished"))?;
+                tx.commit().await.map_err(err)
+            })
+        })
+    }
+
+    fn rollback(&self, py: Python<'_>) -> PyResult<()> {
+        let inner = self.inner.clone();
+        let rt = self.rt.clone();
+        py.detach(|| {
+            rt.block_on(async move {
+                let tx = inner
+                    .lock()
+                    .await
+                    .take()
+                    .ok_or_else(|| err("transaction already finished"))?;
+                tx.rollback().await.map_err(err)
+            })
+        })
+    }
 }
 
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Database>()?;
+    m.add_class::<Transaction>()?;
     Ok(())
 }

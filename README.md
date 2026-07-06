@@ -106,6 +106,18 @@ required:
 FK-aware ordering, dialect type mapping, and destructive-op confirmation are
 built in. See [`agnes-cli/README.md`](./agnes-cli/README.md).
 
+### 6. Interactive transactions
+
+`db.transaction(async (tx) => { … })` (Prisma-style) runs on a dedicated
+connection — commit on success, rollback on throw. Available in TypeScript and
+Python.
+
+### 7. TypeScript *and* Python
+
+The same Rust core is exposed to both: [`agnes-library`](./agnes-library) (npm)
+and [`agnes`](./agnes-py) (PyPI, via PyO3) share the schema DSL, query builder,
+relations, cache and transactions.
+
 ---
 
 ## Quick start
@@ -171,7 +183,7 @@ await db.insertInto("post").values({ userId: 1, content: "Hello!" });
 
 ## Status
 
-Early (`0.0.8`). APIs may change. Contributions welcome.
+Early (`0.0.9`). APIs may change. Contributions welcome.
 
 ## License
 

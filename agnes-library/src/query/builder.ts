@@ -10,7 +10,7 @@ import type {
   RelationKeys,
   ResolveIncludes,
 } from "../schema";
-import type { QueryOpts, RustDatabase } from "../bridge";
+import type { QueryOpts, QueryRunner } from "../bridge";
 
 type Dialect = "postgres" | "mysql" | "sqlite";
 
@@ -148,7 +148,7 @@ export class SelectBuilder<
   private _joins: SqlJoinClause[] = [];
 
   constructor(
-    private readonly db: RustDatabase,
+    private readonly db: QueryRunner,
     private readonly tableName: string,
     private readonly def: T,
     private readonly dialect: Dialect,
@@ -444,7 +444,7 @@ export class SelectBuilder<
 
 export class InsertBuilder<T extends TableDef> {
   constructor(
-    private readonly db: RustDatabase,
+    private readonly db: QueryRunner,
     private readonly tableName: string,
     private readonly def: T,
     private readonly dialect: Dialect,
@@ -470,7 +470,7 @@ export class UpdateBuilder<T extends TableDef> {
   private conds: Condition[] = [];
 
   constructor(
-    private readonly db: RustDatabase,
+    private readonly db: QueryRunner,
     private readonly tableName: string,
     private readonly def: T,
     private readonly patch: Partial<InferRow<T>>,
@@ -502,7 +502,7 @@ export class DeleteBuilder<T extends TableDef> {
   private conds: Condition[] = [];
 
   constructor(
-    private readonly db: RustDatabase,
+    private readonly db: QueryRunner,
     private readonly tableName: string,
     private readonly def: T,
     private readonly dialect: Dialect,

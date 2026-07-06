@@ -87,6 +87,21 @@ db.query("SELECT * FROM users WHERE age > $1", [18], {"ttl": 30})
 db.mutate("UPDATE users SET active = $1 WHERE id = $2", [False, 1])
 ```
 
+## Transactions
+
+Interactive transactions, Prisma-style. `db.transaction(fn)` calls `fn(tx)` with
+the same query API on one connection; commits when it returns, rolls back and
+re-raises if it raises.
+
+```python
+def transfer(tx):
+    tx.update("account", {"balance": 60}).where(eq(acc.id, 1)).run()
+    tx.update("account", {"balance": 40}).where(eq(acc.id, 2)).run()
+    # raise here → both updates roll back
+
+db.transaction(transfer)
+```
+
 Operators: `eq, neq, gt, gte, lt, lte, like`. `query()` (for `include`) has
 `.where`, `.order_by`, `.limit`, `.select(*cols)`, `.type("left"|"inner")`.
 SQL joins: `.left_join/.inner_join/.right_join/.full_join("tbl", on(a, b))`.

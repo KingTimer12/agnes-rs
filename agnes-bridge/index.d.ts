@@ -4,6 +4,19 @@ export declare class Database {
   static connect(config: DatabaseConfig): Promise<Database>
   query(sql: string, params?: Array<any> | undefined | null, opts?: QueryOpts | undefined | null): Promise<any>
   mutate(sql: string, params?: Array<any> | undefined | null): Promise<number>
+  /** Open an interactive transaction on a dedicated connection. */
+  beginTransaction(): Promise<Transaction>
+}
+
+/**
+ * A live transaction handle. `query`/`mutate` run on the transaction's
+ * connection; `commit`/`rollback` finish it (further calls error).
+ */
+export declare class Transaction {
+  query(sql: string, params?: Array<any> | undefined | null, opts?: QueryOpts | undefined | null): Promise<any>
+  mutate(sql: string, params?: Array<any> | undefined | null): Promise<number>
+  commit(): Promise<void>
+  rollback(): Promise<void>
 }
 
 export interface CacheConfig {

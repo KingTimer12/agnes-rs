@@ -198,6 +198,24 @@ type CacheConfig = { enabled: boolean; walPath?: string; compactionThreshold?: n
 
 ---
 
+## Transactions
+
+Interactive transactions, Prisma-style. `db.transaction(fn)` runs `fn` against a
+`tx` with the same query API (`select`/`insertInto`/`update`/`deleteFrom`/`query`/`mutate`),
+all on one connection. It **commits** when `fn` resolves and **rolls back** if it
+throws (the error propagates). Reads inside a transaction always hit the DB; the
+cache is invalidated once, on commit.
+
+```ts
+await db.transaction(async (tx) => {
+  await tx.update("account", { balance: 60 }).where(eq(acc.id, 1)).run();
+  await tx.update("account", { balance: 40 }).where(eq(acc.id, 2)).run();
+  // throw here → both updates roll back
+});
+```
+
+---
+
 ## Configuration
 
 ```ts

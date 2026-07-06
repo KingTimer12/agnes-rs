@@ -4,7 +4,7 @@ Python port of agnes-library (TypeScript). Same schema DSL, query builder,
 relations and cache; synchronous API.
 """
 
-from .client import AgnesClient
+from .client import AgnesClient, TransactionClient
 from .query import (
     DeleteBuilder,
     InsertBuilder,
@@ -41,6 +41,7 @@ from .schema import (
 
 __all__ = [
     "AgnesClient",
+    "TransactionClient",
     "table",
     "int_",
     "bigint",

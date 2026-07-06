@@ -19,6 +19,19 @@ pub trait DatabaseAdapter: Send + Sync {
     async fn query(&self, sql: &str, params: &[Value]) -> Result<Rows>;
     async fn execute(&self, sql: &str, params: &[Value]) -> Result<u64>;
     fn dialect(&self) -> Dialect;
+
+    /// Check out a dedicated connection and open a transaction on it (BEGIN).
+    async fn begin(&self) -> Result<Box<dyn DbTransaction>>;
+}
+
+/// A transaction bound to a single connection. Queries run on that connection
+/// until `commit`/`rollback` consumes it.
+#[async_trait]
+pub trait DbTransaction: Send {
+    async fn query(&mut self, sql: &str, params: &[Value]) -> Result<Rows>;
+    async fn execute(&mut self, sql: &str, params: &[Value]) -> Result<u64>;
+    async fn commit(self: Box<Self>) -> Result<()>;
+    async fn rollback(self: Box<Self>) -> Result<()>;
 }
 
 pub trait DatabaseBind {

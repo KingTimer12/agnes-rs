@@ -1,11 +1,57 @@
-use agnes_core::adapter::{DatabaseAdapter, DatabaseBind, Dialect};
+use agnes_core::adapter::{DatabaseAdapter, DatabaseBind, DbTransaction, Dialect};
 use agnes_core::error::{AgnesError, Result};
 use agnes_core::types::{Rows, Value};
 use async_trait::async_trait;
+use sqlx::Sqlite;
+use sqlx::pool::PoolConnection;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use std::str::FromStr;
 
 use crate::row_ref::SqliteRowRef;
+
+fn adapter_err<E: std::fmt::Display>(e: E) -> AgnesError {
+    AgnesError::Adapter(e.to_string())
+}
+
+/// Transaction bound to one pooled SQLite connection.
+pub struct SqliteTx {
+    conn: PoolConnection<Sqlite>,
+}
+
+#[async_trait]
+impl DbTransaction for SqliteTx {
+    async fn query(&mut self, sql: &str, params: &[Value]) -> Result<Rows> {
+        let q = SqliteAdapter::bind(sqlx::query(sql), params);
+        let rows = q.fetch_all(&mut *self.conn).await.map_err(adapter_err)?;
+        rows.iter()
+            .map(|row| SqliteRowRef(row).try_into())
+            .collect()
+    }
+
+    async fn execute(&mut self, sql: &str, params: &[Value]) -> Result<u64> {
+        let q = SqliteAdapter::bind(sqlx::query(sql), params);
+        Ok(q.execute(&mut *self.conn)
+            .await
+            .map_err(adapter_err)?
+            .rows_affected())
+    }
+
+    async fn commit(mut self: Box<Self>) -> Result<()> {
+        sqlx::query("COMMIT")
+            .execute(&mut *self.conn)
+            .await
+            .map_err(adapter_err)?;
+        Ok(())
+    }
+
+    async fn rollback(mut self: Box<Self>) -> Result<()> {
+        sqlx::query("ROLLBACK")
+            .execute(&mut *self.conn)
+            .await
+            .map_err(adapter_err)?;
+        Ok(())
+    }
+}
 
 mod bind;
 mod row_ref;
@@ -58,5 +104,14 @@ impl DatabaseAdapter for SqliteAdapter {
 
     fn dialect(&self) -> Dialect {
         Dialect::Sqlite
+    }
+
+    async fn begin(&self) -> Result<Box<dyn DbTransaction>> {
+        let mut conn = self.pool.acquire().await.map_err(adapter_err)?;
+        sqlx::query("BEGIN")
+            .execute(&mut *conn)
+            .await
+            .map_err(adapter_err)?;
+        Ok(Box::new(SqliteTx { conn }))
     }
 }

@@ -1,6 +1,7 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
-use crate::adapter::DatabaseAdapter;
+use crate::adapter::{DatabaseAdapter, DbTransaction};
 use crate::cache::CacheBackend;
 use crate::error::Result;
 use crate::key::{cache_key, tag_for_table};
@@ -59,5 +60,56 @@ impl Executor {
             cache.invalidate_tags(&tags).await?;
         }
         Ok(affected)
+    }
+
+    /// Open an interactive transaction on a dedicated connection.
+    pub async fn begin(&self) -> Result<Transaction> {
+        Ok(Transaction {
+            inner: self.adapter.begin().await?,
+            cache: self.cache.clone(),
+            tags: HashSet::new(),
+        })
+    }
+}
+
+/// An interactive transaction. Reads always hit the DB (never the cache) for
+/// read-your-writes consistency; mutations accumulate cache tags that are
+/// invalidated once — on `commit`.
+pub struct Transaction {
+    inner: Box<dyn DbTransaction>,
+    cache: Option<Arc<dyn CacheBackend>>,
+    tags: HashSet<String>,
+}
+
+impl Transaction {
+    pub async fn query(&mut self, sql: &str, params: &[Value]) -> Result<Rows> {
+        self.inner.query(sql, params).await
+    }
+
+    pub async fn mutate(&mut self, sql: &str, params: &[Value]) -> Result<u64> {
+        let parsed = parse(sql)?;
+        let affected = self.inner.execute(sql, params).await?;
+        if parsed.kind.is_mutation() {
+            for t in &parsed.tables {
+                self.tags.insert(tag_for_table(t));
+            }
+        }
+        Ok(affected)
+    }
+
+    pub async fn commit(self) -> Result<()> {
+        let Transaction { inner, cache, tags } = self;
+        inner.commit().await?;
+        if let Some(cache) = &cache
+            && !tags.is_empty()
+        {
+            let tags: Vec<String> = tags.into_iter().collect();
+            cache.invalidate_tags(&tags).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn rollback(self) -> Result<()> {
+        self.inner.rollback().await
     }
 }
