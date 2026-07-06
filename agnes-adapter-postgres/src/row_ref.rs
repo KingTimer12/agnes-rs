@@ -70,9 +70,33 @@ impl<'a> RowRef<PostgresRowRef<'a>> for PostgresRowRef<'a> {
                 v.map(|t| J::String(t.format("%H:%M:%S%.f").to_string()))
                     .unwrap_or(J::Null)
             }),
-            _ => row
-                .try_get::<Option<String>, _>(i)
-                .map(|v| v.map(J::String).unwrap_or(J::Null)),
+            // Unknown type (PostGIS geometry, enums, arrays, NUMERIC, …).
+            // Try text first; if the type isn't text-compatible, fall back to
+            // raw bytes instead of hard-failing the whole row.
+            _ => match row.try_get::<Option<String>, _>(i) {
+                Ok(v) => Ok(v.map(J::String).unwrap_or(J::Null)),
+                Err(_) => match row.try_get_raw(i) {
+                    Ok(raw) => {
+                        use sqlx::ValueRef;
+                        if raw.is_null() {
+                            Ok(J::Null)
+                        } else {
+                            let bytes = raw.as_bytes().unwrap_or(&[]);
+                            // Many custom types arrive text-encoded on the wire
+                            // (PostGIS geometry as WKT, citext, unknown enums…).
+                            // Prefer a UTF-8 string; fall back to a byte array
+                            // only for genuinely binary payloads.
+                            match std::str::from_utf8(bytes) {
+                                Ok(s) => Ok(J::String(s.to_string())),
+                                Err(_) => Ok(J::Array(
+                                    bytes.iter().map(|x| J::Number((*x).into())).collect(),
+                                )),
+                            }
+                        }
+                    }
+                    Err(e) => Err(e),
+                },
+            },
         };
         v.map_err(|e| AgnesError::Adapter(e.to_string()))
     }
