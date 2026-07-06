@@ -60,7 +60,12 @@ db = AgnesClient.create(
     {
         "driver": "postgres",            # "postgres" | "mysql" | "sqlite"
         "url": "postgres://user:pass@host/db",
-        "max_connections": 10,           # optional
+        # connection pool tuning (all optional):
+        "max_connections": 10,           # hard cap (default 10)
+        "min_connections": 0,            # kept warm while idle (default 0)
+        "acquire_timeout_secs": 30,      # wait for a free connection
+        "idle_timeout_secs": 600,        # close after this idle time
+        "max_lifetime_secs": 1800,       # recycle after this lifetime
         "strip_timezone": True,          # optional: timestamps as naive ISO (no offset)
         "cache": {"enabled": True, "wal_path": ".agnes/cache.wal"},
     },

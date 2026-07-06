@@ -222,10 +222,18 @@ await db.transaction(async (tx) => {
 interface DatabaseConfig {
   driver: "postgres" | "mysql" | "sqlite";
   url: string;
-  maxConnections?: number;
+  // Connection pool tuning (all optional):
+  maxConnections?: number;    // hard cap on open connections (default 10)
+  minConnections?: number;    // connections kept warm while idle (default 0)
+  acquireTimeoutSecs?: number; // wait for a free connection before erroring
+  idleTimeoutSecs?: number;   // close a connection after this idle time
+  maxLifetimeSecs?: number;   // recycle a connection after this lifetime
   cache?: CacheConfig;
 }
 ```
+
+Every driver is pooled by default (via `sqlx`). Tune it with the fields above;
+omit them for sensible defaults.
 
 ---
 

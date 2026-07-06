@@ -12,7 +12,16 @@ export interface CacheConfig {
 export interface DatabaseConfig {
   driver: Driver;
   url: string;
+  /** Max open connections in the pool (default 10). */
   maxConnections?: number;
+  /** Connections kept warm even while idle (default 0). */
+  minConnections?: number;
+  /** Seconds `acquire` waits for a free connection before erroring. */
+  acquireTimeoutSecs?: number;
+  /** Close a connection after it has been idle this many seconds. */
+  idleTimeoutSecs?: number;
+  /** Recycle a connection after it has lived this many seconds. */
+  maxLifetimeSecs?: number;
   cache?: CacheConfig;
   /**
    * Return temporal values (timestamp/date/time) without a timezone offset —

@@ -1,4 +1,4 @@
-use agnes_core::adapter::{DatabaseAdapter, DatabaseBind, DbTransaction, Dialect};
+use agnes_core::adapter::{DatabaseAdapter, DatabaseBind, DbTransaction, Dialect, PoolConfig};
 use agnes_core::error::{AgnesError, Result};
 use agnes_core::types::{Rows, Value};
 use async_trait::async_trait;
@@ -7,6 +7,23 @@ use sqlx::mysql::{MySqlPool, MySqlPoolOptions};
 use sqlx::pool::PoolConnection;
 
 use crate::row_ref::MySqlRowRef;
+
+/// Apply the shared pool tuning to a MySQL pool builder.
+fn apply_pool_opts(mut o: MySqlPoolOptions, cfg: &PoolConfig) -> MySqlPoolOptions {
+    o = o
+        .max_connections(cfg.max_connections.max(1))
+        .min_connections(cfg.min_connections);
+    if let Some(d) = cfg.acquire_timeout {
+        o = o.acquire_timeout(d);
+    }
+    if let Some(d) = cfg.idle_timeout {
+        o = o.idle_timeout(d);
+    }
+    if let Some(d) = cfg.max_lifetime {
+        o = o.max_lifetime(d);
+    }
+    o
+}
 
 fn adapter_err<E: std::fmt::Display>(e: E) -> AgnesError {
     AgnesError::Adapter(e.to_string())
@@ -68,9 +85,8 @@ pub struct MySqlAdapter {
 }
 
 impl MySqlAdapter {
-    pub async fn connect(url: &str, max_connections: u32, strip_tz: bool) -> Result<Self> {
-        let pool = MySqlPoolOptions::new()
-            .max_connections(max_connections.max(1))
+    pub async fn connect(url: &str, cfg: &PoolConfig, strip_tz: bool) -> Result<Self> {
+        let pool = apply_pool_opts(MySqlPoolOptions::new(), cfg)
             .connect(url)
             .await
             .map_err(|e| AgnesError::Adapter(e.to_string()))?;

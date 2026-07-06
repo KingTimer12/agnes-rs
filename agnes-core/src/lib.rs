@@ -6,7 +6,7 @@ pub mod key;
 pub mod parser;
 pub mod types;
 
-pub use adapter::{DatabaseAdapter, DbTransaction, Dialect};
+pub use adapter::{DatabaseAdapter, DbTransaction, Dialect, PoolConfig};
 pub use cache::CacheBackend;
 pub use error::{AgnesError, Result};
 pub use executor::{Executor, Transaction};

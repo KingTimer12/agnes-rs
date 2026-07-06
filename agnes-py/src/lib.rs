@@ -4,7 +4,7 @@ use agnes_adapter_mysql::MySqlAdapter;
 use agnes_adapter_postgres::PostgresAdapter;
 use agnes_adapter_sqlite::SqliteAdapter;
 use agnes_cache::{KvConfig, KvMotor};
-use agnes_core::adapter::DatabaseAdapter;
+use agnes_core::adapter::{DatabaseAdapter, PoolConfig};
 use agnes_core::cache::CacheBackend;
 use agnes_core::executor::{Executor, Transaction as CoreTx};
 use agnes_core::types::{QueryOptions, Value};
@@ -111,8 +111,15 @@ impl Database {
         let driver =
             opt_string(config, "driver")?.ok_or_else(|| err("config.driver is required"))?;
         let url = opt_string(config, "url")?.ok_or_else(|| err("config.url is required"))?;
-        let max = opt_u32(config, "max_connections")?.unwrap_or(10);
         let strip_tz = opt_bool(config, "strip_timezone")?.unwrap_or(false);
+        let secs = |v: Option<u32>| v.map(|s| std::time::Duration::from_secs(s as u64));
+        let pool = PoolConfig {
+            max_connections: opt_u32(config, "max_connections")?.unwrap_or(10),
+            min_connections: opt_u32(config, "min_connections")?.unwrap_or(0),
+            acquire_timeout: secs(opt_u32(config, "acquire_timeout_secs")?),
+            idle_timeout: secs(opt_u32(config, "idle_timeout_secs")?),
+            max_lifetime: secs(opt_u32(config, "max_lifetime_secs")?),
+        };
 
         // Build the cache backend from the (GIL-held) config first.
         let cache: Option<Arc<dyn CacheBackend>> = match config.get_item("cache")? {
@@ -151,12 +158,12 @@ impl Database {
                 rt.block_on(async {
                     let a: Arc<dyn DatabaseAdapter> = match driver.to_ascii_lowercase().as_str() {
                         "postgres" | "postgresql" | "pg" => {
-                            Arc::new(PostgresAdapter::connect(&url, max, strip_tz).await?)
+                            Arc::new(PostgresAdapter::connect(&url, &pool, strip_tz).await?)
                         }
                         "mysql" | "mariadb" => {
-                            Arc::new(MySqlAdapter::connect(&url, max, strip_tz).await?)
+                            Arc::new(MySqlAdapter::connect(&url, &pool, strip_tz).await?)
                         }
-                        "sqlite" => Arc::new(SqliteAdapter::connect(&url, max, strip_tz).await?),
+                        "sqlite" => Arc::new(SqliteAdapter::connect(&url, &pool, strip_tz).await?),
                         other => {
                             return Err(agnes_core::error::AgnesError::Adapter(format!(
                                 "unknown driver: {other}"

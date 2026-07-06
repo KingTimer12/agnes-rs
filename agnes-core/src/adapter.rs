@@ -1,7 +1,37 @@
+use std::time::Duration;
+
 use async_trait::async_trait;
 
 use crate::error::Result;
 use crate::types::{Rows, Value};
+
+/// Connection-pool tuning shared by every adapter. `None` timeouts fall back to
+/// the sqlx defaults. Durations are seconds at the config surface.
+#[derive(Debug, Clone)]
+pub struct PoolConfig {
+    /// Hard cap on open connections.
+    pub max_connections: u32,
+    /// Connections kept warm even while idle.
+    pub min_connections: u32,
+    /// How long `acquire` waits for a free connection before erroring.
+    pub acquire_timeout: Option<Duration>,
+    /// Close a connection after it has been idle this long.
+    pub idle_timeout: Option<Duration>,
+    /// Recycle a connection after it has lived this long.
+    pub max_lifetime: Option<Duration>,
+}
+
+impl Default for PoolConfig {
+    fn default() -> Self {
+        Self {
+            max_connections: 10,
+            min_connections: 0,
+            acquire_timeout: None,
+            idle_timeout: None,
+            max_lifetime: None,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Dialect {

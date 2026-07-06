@@ -8,7 +8,7 @@ use agnes_adapter_mysql::MySqlAdapter;
 use agnes_adapter_postgres::PostgresAdapter;
 use agnes_adapter_sqlite::SqliteAdapter;
 use agnes_cache::{KvConfig, KvMotor};
-use agnes_core::adapter::DatabaseAdapter;
+use agnes_core::adapter::{DatabaseAdapter, PoolConfig};
 use agnes_core::cache::CacheBackend;
 use agnes_core::executor::Executor;
 use agnes_core::types::QueryOptions;
@@ -21,7 +21,16 @@ use crate::convert::{js_values_to_params, rows_to_json};
 pub struct DatabaseConfig {
   pub driver: String,
   pub url: String,
+  /// Max open connections in the pool (default 10).
   pub max_connections: Option<u32>,
+  /// Connections kept warm even while idle (default 0).
+  pub min_connections: Option<u32>,
+  /// Seconds `acquire` waits for a free connection before erroring.
+  pub acquire_timeout_secs: Option<u32>,
+  /// Close a connection after it has been idle this many seconds.
+  pub idle_timeout_secs: Option<u32>,
+  /// Recycle a connection after it has lived this many seconds.
+  pub max_lifetime_secs: Option<u32>,
   pub cache: Option<CacheConfig>,
   /// Return temporal values without a timezone offset (naive wall-clock ISO).
   /// Avoids the JS `Date` tz-shift footgun. Postgres only; defaults to false.
@@ -51,22 +60,29 @@ pub struct Database {
 impl Database {
   #[napi(factory)]
   pub async fn connect(config: DatabaseConfig) -> Result<Database> {
-    let max = config.max_connections.unwrap_or(10);
     let strip_tz = config.strip_timezone.unwrap_or(false);
+    let secs = |v: Option<u32>| v.map(|s| std::time::Duration::from_secs(s as u64));
+    let pool = PoolConfig {
+      max_connections: config.max_connections.unwrap_or(10),
+      min_connections: config.min_connections.unwrap_or(0),
+      acquire_timeout: secs(config.acquire_timeout_secs),
+      idle_timeout: secs(config.idle_timeout_secs),
+      max_lifetime: secs(config.max_lifetime_secs),
+    };
 
     let adapter: Arc<dyn DatabaseAdapter> = match config.driver.to_ascii_lowercase().as_str() {
       "postgres" | "postgresql" | "pg" => Arc::new(
-        PostgresAdapter::connect(&config.url, max, strip_tz)
+        PostgresAdapter::connect(&config.url, &pool, strip_tz)
           .await
           .map_err(to_napi)?,
       ),
       "mysql" | "mariadb" => Arc::new(
-        MySqlAdapter::connect(&config.url, max, strip_tz)
+        MySqlAdapter::connect(&config.url, &pool, strip_tz)
           .await
           .map_err(to_napi)?,
       ),
       "sqlite" => Arc::new(
-        SqliteAdapter::connect(&config.url, max, strip_tz)
+        SqliteAdapter::connect(&config.url, &pool, strip_tz)
           .await
           .map_err(to_napi)?,
       ),

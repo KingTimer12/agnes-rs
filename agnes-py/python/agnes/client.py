@@ -66,7 +66,9 @@ class AgnesClient(_ClientBase):
     def create(cls, config: Dict[str, Any], schema: Schema) -> "AgnesClient":
         """Connect and wire the client.
 
-        config keys: driver, url, max_connections?, strip_timezone?,
+        config keys: driver, url, strip_timezone?,
+        pool tuning: max_connections?, min_connections?, acquire_timeout_secs?,
+        idle_timeout_secs?, max_lifetime_secs?,
         cache?={enabled, wal_path?, compaction_threshold?}
         """
         db = Database.connect(config)

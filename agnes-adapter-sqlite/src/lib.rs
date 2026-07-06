@@ -1,4 +1,4 @@
-use agnes_core::adapter::{DatabaseAdapter, DatabaseBind, DbTransaction, Dialect};
+use agnes_core::adapter::{DatabaseAdapter, DatabaseBind, DbTransaction, Dialect, PoolConfig};
 use agnes_core::error::{AgnesError, Result};
 use agnes_core::types::{Rows, Value};
 use async_trait::async_trait;
@@ -8,6 +8,23 @@ use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use std::str::FromStr;
 
 use crate::row_ref::SqliteRowRef;
+
+/// Apply the shared pool tuning to a SQLite pool builder.
+fn apply_pool_opts(mut o: SqlitePoolOptions, cfg: &PoolConfig) -> SqlitePoolOptions {
+    o = o
+        .max_connections(cfg.max_connections.max(1))
+        .min_connections(cfg.min_connections);
+    if let Some(d) = cfg.acquire_timeout {
+        o = o.acquire_timeout(d);
+    }
+    if let Some(d) = cfg.idle_timeout {
+        o = o.idle_timeout(d);
+    }
+    if let Some(d) = cfg.max_lifetime {
+        o = o.max_lifetime(d);
+    }
+    o
+}
 
 fn adapter_err<E: std::fmt::Display>(e: E) -> AgnesError {
     AgnesError::Adapter(e.to_string())
@@ -63,12 +80,11 @@ pub struct SqliteAdapter {
 impl SqliteAdapter {
     // `_strip_tz` is accepted for a uniform adapter API; SQLite stores temporal
     // values as TEXT/INTEGER with no timezone, so there is nothing to strip.
-    pub async fn connect(url: &str, max_connections: u32, _strip_tz: bool) -> Result<Self> {
+    pub async fn connect(url: &str, cfg: &PoolConfig, _strip_tz: bool) -> Result<Self> {
         let opts = SqliteConnectOptions::from_str(url)
             .map_err(|e| AgnesError::Adapter(e.to_string()))?
             .create_if_missing(true);
-        let pool = SqlitePoolOptions::new()
-            .max_connections(max_connections.max(1))
+        let pool = apply_pool_opts(SqlitePoolOptions::new(), cfg)
             .connect_with(opts)
             .await
             .map_err(|e| AgnesError::Adapter(e.to_string()))?;
