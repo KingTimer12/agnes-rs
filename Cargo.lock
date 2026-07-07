@@ -8,6 +8,7 @@ version = "0.0.11"
 dependencies = [
  "agnes-core",
  "async-trait",
+ "futures-util",
  "serde_json",
  "sqlx",
  "tokio",
@@ -20,6 +21,7 @@ version = "0.0.11"
 dependencies = [
  "agnes-core",
  "async-trait",
+ "futures-util",
  "serde_json",
  "sqlx",
  "tokio",
@@ -32,6 +34,7 @@ version = "0.0.11"
 dependencies = [
  "agnes-core",
  "async-trait",
+ "futures-util",
  "serde_json",
  "sqlx",
  "tokio",
@@ -64,6 +67,7 @@ dependencies = [
  "sqlparser",
  "sqlx",
  "thiserror",
+ "tokio",
  "tracing",
 ]
 

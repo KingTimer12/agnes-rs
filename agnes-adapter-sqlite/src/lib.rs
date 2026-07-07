@@ -1,7 +1,9 @@
 use agnes_core::adapter::{DatabaseAdapter, DatabaseBind, DbTransaction, Dialect, PoolConfig};
 use agnes_core::error::{AgnesError, Result};
+use agnes_core::stream::RowStream;
 use agnes_core::types::{Rows, Value};
 use async_trait::async_trait;
+use futures_util::StreamExt;
 use sqlx::Sqlite;
 use sqlx::pool::PoolConnection;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
@@ -120,6 +122,28 @@ impl DatabaseAdapter for SqliteAdapter {
 
     fn dialect(&self) -> Dialect {
         Dialect::Sqlite
+    }
+
+    fn stream(&self, sql: &str, params: &[Value]) -> RowStream {
+        let pool = self.pool.clone();
+        let sql = sql.to_string();
+        let params = params.to_vec();
+        let (tx, stream) = RowStream::channel();
+        tokio::spawn(async move {
+            let q = SqliteAdapter::bind(sqlx::query(&sql), &params);
+            let mut rows = q.fetch(&pool);
+            while let Some(item) = rows.next().await {
+                let msg = match item {
+                    Ok(row) => SqliteRowRef(&row).try_into(),
+                    Err(e) => Err(adapter_err(e)),
+                };
+                let is_err = msg.is_err();
+                if tx.send(msg).await.is_err() || is_err {
+                    break;
+                }
+            }
+        });
+        stream
     }
 
     async fn begin(&self) -> Result<Box<dyn DbTransaction>> {

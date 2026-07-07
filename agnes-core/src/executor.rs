@@ -62,6 +62,12 @@ impl Executor {
         Ok(affected)
     }
 
+    /// Stream a query row-by-row (constant memory). Bypasses the cache — a
+    /// streamed result is never cached or served from cache.
+    pub fn stream(&self, sql: &str, params: &[Value]) -> crate::stream::RowStream {
+        self.adapter.stream(sql, params)
+    }
+
     /// Open an interactive transaction on a dedicated connection.
     pub async fn begin(&self) -> Result<Transaction> {
         Ok(Transaction {

@@ -4,9 +4,11 @@ pub mod error;
 pub mod executor;
 pub mod key;
 pub mod parser;
+pub mod stream;
 pub mod types;
 
 pub use adapter::{DatabaseAdapter, DbTransaction, Dialect, PoolConfig};
+pub use stream::{RowStream, RowSender};
 pub use cache::CacheBackend;
 pub use error::{AgnesError, Result};
 pub use executor::{Executor, Transaction};

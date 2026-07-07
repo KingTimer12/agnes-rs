@@ -138,6 +138,21 @@ impl Database {
     Ok(affected as u32)
   }
 
+  /// Stream a read query row-by-row (constant memory). Pull batches from the
+  /// returned handle with `nextBatch(n)`; an empty batch means end of stream.
+  #[napi]
+  pub async fn stream(
+    &self,
+    sql: String,
+    params: Option<Vec<serde_json::Value>>,
+  ) -> Result<RowStream> {
+    let params = js_values_to_params(params.unwrap_or_default());
+    let inner = self.executor.stream(&sql, &params);
+    Ok(RowStream {
+      inner: Arc::new(tokio::sync::Mutex::new(inner)),
+    })
+  }
+
   /// Open an interactive transaction on a dedicated connection.
   #[napi]
   pub async fn begin_transaction(&self) -> Result<Transaction> {
@@ -145,6 +160,23 @@ impl Database {
     Ok(Transaction {
       inner: Arc::new(tokio::sync::Mutex::new(Some(tx))),
     })
+  }
+}
+
+/// A pull-based row stream. `nextBatch(n)` resolves to up to `n` rows; an empty
+/// array means the stream is exhausted.
+#[napi]
+pub struct RowStream {
+  inner: Arc<tokio::sync::Mutex<agnes_core::stream::RowStream>>,
+}
+
+#[napi]
+impl RowStream {
+  #[napi]
+  pub async fn next_batch(&self, n: u32) -> Result<serde_json::Value> {
+    let mut guard = self.inner.lock().await;
+    let rows = guard.next_batch(n as usize).await.map_err(to_napi)?;
+    Ok(rows_to_json(rows))
   }
 }
 

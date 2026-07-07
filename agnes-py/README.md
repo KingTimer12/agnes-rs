@@ -83,6 +83,11 @@ rows = (db.select("user")
 
 with_posts = db.select("user").include({"posts": query().limit(3)}).all()
 
+# stream large results row-by-row (constant memory; server-side cursor on Postgres)
+for user in db.select("user").where(gt(U.age, 18)).stream(batch_size=1000):
+    process(user)
+# not available in a transaction; incompatible with include()
+
 db.insert_into("user").values({"name": "Ana", "age": 30})
 
 # bulk insert — one statement, auto-chunked to the param limit; missing keys → NULL

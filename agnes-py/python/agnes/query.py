@@ -360,6 +360,32 @@ class SelectBuilder:
         rows = self.all()
         return rows[0] if rows else None
 
+    def stream(self, batch_size: int = 500):
+        """Stream the result row-by-row instead of buffering it all — for
+        scanning large tables without exhausting memory. The Rust core fetches in
+        batches of batch_size behind a bounded channel (server-side cursor on
+        Postgres). Not available inside a transaction; incompatible with
+        include(). Yields one dict per row.
+
+            for user in db.select("user").where(gt(U.age, 18)).stream():
+                process(user)
+        """
+        stream_fn = getattr(self._db, "stream", None)
+        if stream_fn is None:
+            raise RuntimeError(
+                "streaming is only available on the database, not inside a transaction"
+            )
+        if self._includes:
+            raise RuntimeError("cannot stream a query with include(); relations need the full result set")
+        sql, params = self.build()
+        handle = stream_fn(sql, params)
+        while True:
+            batch = handle.next_batch(batch_size)
+            if not batch:
+                break
+            for row in batch:
+                yield row
+
     # ── include resolution ────────────────────────────────────────────────────
     def _resolve_includes(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         active = [(k, v) for k, v in self._includes.items() if v is not None and v is not False]

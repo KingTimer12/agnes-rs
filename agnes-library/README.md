@@ -118,6 +118,22 @@ const adults = await db
 `.first()` returns one row or `null`. `.bypassCache()` skips the cache for that
 query.
 
+### Streaming large results
+
+`.stream(batchSize?)` returns an async iterator that pulls rows in batches
+instead of buffering the whole result — for scanning huge tables in constant
+memory. The Rust core fetches behind a bounded channel (server-side cursor on
+Postgres), so it never materializes all rows at once.
+
+```ts
+for await (const user of db.select("user").where(gt(u.age, 18)).stream(1000)) {
+  process(user); // one row at a time; memory stays flat over millions of rows
+}
+```
+
+Not available inside a transaction, and incompatible with `.include()`
+(relations need the full set). `.where()`, `.orderBy()` and joins work.
+
 ### Relations with `.include()` (no N+1)
 
 ```ts

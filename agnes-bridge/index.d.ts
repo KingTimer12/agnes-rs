@@ -4,8 +4,21 @@ export declare class Database {
   static connect(config: DatabaseConfig): Promise<Database>
   query(sql: string, params?: Array<any> | undefined | null, opts?: QueryOpts | undefined | null): Promise<any>
   mutate(sql: string, params?: Array<any> | undefined | null): Promise<number>
+  /**
+   * Stream a read query row-by-row (constant memory). Pull batches from the
+   * returned handle with `nextBatch(n)`; an empty batch means end of stream.
+   */
+  stream(sql: string, params?: Array<any> | undefined | null): Promise<RowStream>
   /** Open an interactive transaction on a dedicated connection. */
   beginTransaction(): Promise<Transaction>
+}
+
+/**
+ * A pull-based row stream. `nextBatch(n)` resolves to up to `n` rows; an empty
+ * array means the stream is exhausted.
+ */
+export declare class RowStream {
+  nextBatch(n: number): Promise<any>
 }
 
 /**

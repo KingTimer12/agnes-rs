@@ -455,6 +455,36 @@ export class SelectBuilder<
     return rows[0] ?? null;
   }
 
+  /**
+   * Stream the result row-by-row instead of buffering it all — for scanning
+   * large tables without exhausting memory. The Rust core fetches in batches of
+   * `batchSize` behind a bounded channel (server-side cursor on Postgres).
+   *
+   * ```ts
+   * for await (const user of db.select("user").where(gt(u.age, 18)).stream()) {
+   *   process(user);
+   * }
+   * ```
+   *
+   * Not available inside a transaction, and incompatible with `.include()`
+   * (relations need the full result set). `.where()`/`.orderBy()`/joins work.
+   */
+  async *stream(batchSize = 500): AsyncGenerator<InferRow<T>, void, unknown> {
+    if (!this.db.stream) {
+      throw new Error("streaming is only available on the database, not inside a transaction");
+    }
+    if (Object.keys(this._includes).length > 0) {
+      throw new Error("cannot stream a query with .include(); relations need the full result set");
+    }
+    const { sql, params } = this.build();
+    const handle = await this.db.stream(sql, params);
+    for (;;) {
+      const batch = (await handle.nextBatch(batchSize)) as InferRow<T>[];
+      if (batch.length === 0) break;
+      for (const row of batch) yield row;
+    }
+  }
+
   // ─── Include resolution ───────────────────────────────────────────────────
 
   private async _resolveIncludes(

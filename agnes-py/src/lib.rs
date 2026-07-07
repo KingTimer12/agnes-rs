@@ -213,6 +213,25 @@ impl Database {
             .map_err(err)
     }
 
+    /// Stream a read query row-by-row (constant memory). Pull batches from the
+    /// returned handle with `next_batch(n)`; an empty list means end of stream.
+    #[pyo3(signature = (sql, params=None))]
+    fn stream(
+        &self,
+        py: Python<'_>,
+        sql: String,
+        params: Option<&Bound<'_, PyList>>,
+    ) -> PyResult<RowStream> {
+        let params = params_from(params)?;
+        let executor = self.executor.clone();
+        let rt = self.rt.clone();
+        let inner = py.detach(|| rt.block_on(async move { executor.stream(&sql, &params) }));
+        Ok(RowStream {
+            inner: std::sync::Mutex::new(inner),
+            rt: self.rt.clone(),
+        })
+    }
+
     /// Open an interactive transaction on a dedicated connection.
     fn begin_transaction(&self, py: Python<'_>) -> PyResult<Transaction> {
         let executor = self.executor.clone();
@@ -313,9 +332,31 @@ impl Transaction {
     }
 }
 
+/// A pull-based row stream. `next_batch(n)` returns up to `n` rows as a list of
+/// dicts; an empty list means the stream is exhausted.
+#[pyclass]
+struct RowStream {
+    inner: std::sync::Mutex<agnes_core::stream::RowStream>,
+    rt: Arc<Runtime>,
+}
+
+#[pymethods]
+impl RowStream {
+    fn next_batch(&self, py: Python<'_>, n: usize) -> PyResult<Py<PyAny>> {
+        let rows = py
+            .detach(|| {
+                let mut guard = self.inner.lock().unwrap();
+                self.rt.block_on(guard.next_batch(n))
+            })
+            .map_err(err)?;
+        Ok(pythonize(py, &rows).map_err(err)?.unbind())
+    }
+}
+
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Database>()?;
     m.add_class::<Transaction>()?;
+    m.add_class::<RowStream>()?;
     Ok(())
 }

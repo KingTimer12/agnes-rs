@@ -38,10 +38,17 @@ export interface QueryOpts {
   bypassCache?: boolean;
 }
 
+/** A pull-based row stream: `nextBatch(n)` resolves to up to `n` rows; `[]` = done. */
+export interface RustRowStream {
+  nextBatch(n: number): Promise<unknown>;
+}
+
 /** Shared surface of the DB handle and a transaction — what the builders call. */
 export interface QueryRunner {
   query(sql: string, params?: unknown[], opts?: QueryOpts): Promise<unknown>;
   mutate(sql: string, params?: unknown[]): Promise<number>;
+  /** Only present on the database handle, not on a transaction. */
+  stream?(sql: string, params?: unknown[]): Promise<RustRowStream>;
 }
 
 export interface RustTransaction extends QueryRunner {
@@ -50,6 +57,7 @@ export interface RustTransaction extends QueryRunner {
 }
 
 export interface RustDatabase extends QueryRunner {
+  stream(sql: string, params?: unknown[]): Promise<RustRowStream>;
   beginTransaction(): Promise<RustTransaction>;
 }
 

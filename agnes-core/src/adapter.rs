@@ -3,6 +3,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 
 use crate::error::Result;
+use crate::stream::RowStream;
 use crate::types::{Rows, Value};
 
 /// Connection-pool tuning shared by every adapter. `None` timeouts fall back to
@@ -49,6 +50,11 @@ pub trait DatabaseAdapter: Send + Sync {
     async fn query(&self, sql: &str, params: &[Value]) -> Result<Rows>;
     async fn execute(&self, sql: &str, params: &[Value]) -> Result<u64>;
     fn dialect(&self) -> Dialect;
+
+    /// Stream a read query row-by-row through a bounded channel (constant
+    /// memory). Spawns a background producer task, so it must be called from
+    /// within a Tokio runtime context.
+    fn stream(&self, sql: &str, params: &[Value]) -> RowStream;
 
     /// Check out a dedicated connection and open a transaction on it (BEGIN).
     async fn begin(&self) -> Result<Box<dyn DbTransaction>>;

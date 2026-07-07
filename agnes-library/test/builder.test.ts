@@ -253,6 +253,36 @@ test("returning throws on mysql", async () => {
   ).rejects.toThrow(/not supported on MySQL/);
 });
 
+// ─── streaming ──────────────────────────────────────────────────────────────
+
+test("stream() pulls batches until empty and yields each row", async () => {
+  const pages = [[{ id: 1 }, { id: 2 }], [{ id: 3 }], []];
+  let call = 0;
+  const runner: QueryRunner = {
+    async query() {
+      return [];
+    },
+    async mutate() {
+      return 0;
+    },
+    async stream() {
+      return { async nextBatch() { return pages[call++]; } };
+    },
+  };
+  const b = new SelectBuilder(runner, "orders", orderTbl.def, "postgres", schema);
+  const got: unknown[] = [];
+  for await (const row of b.stream(2)) got.push(row);
+  expect(got).toEqual([{ id: 1 }, { id: 2 }, { id: 3 }]);
+});
+
+test("stream() rejects inside a transaction (no stream on runner)", async () => {
+  const runner: QueryRunner = { async query() { return []; }, async mutate() { return 0; } };
+  const b = new SelectBuilder(runner, "orders", orderTbl.def, "postgres", schema);
+  await expect(async () => {
+    for await (const _ of b.stream()) void _;
+  }).toThrow(/only available on the database/);
+});
+
 test("bulk insert chunks by param limit (sqlite)", async () => {
   const { runner, calls } = mutCapture();
   // sqlite cap 900 vars / 1 col = 900 rows per chunk.

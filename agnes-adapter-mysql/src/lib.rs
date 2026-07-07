@@ -1,7 +1,9 @@
 use agnes_core::adapter::{DatabaseAdapter, DatabaseBind, DbTransaction, Dialect, PoolConfig};
 use agnes_core::error::{AgnesError, Result};
+use agnes_core::stream::RowStream;
 use agnes_core::types::{Rows, Value};
 use async_trait::async_trait;
+use futures_util::StreamExt;
 use sqlx::MySql;
 use sqlx::mysql::{MySqlPool, MySqlPoolOptions};
 use sqlx::pool::PoolConnection;
@@ -131,6 +133,33 @@ impl DatabaseAdapter for MySqlAdapter {
 
     fn dialect(&self) -> Dialect {
         Dialect::MySql
+    }
+
+    fn stream(&self, sql: &str, params: &[Value]) -> RowStream {
+        let pool = self.pool.clone();
+        let sql = sql.to_string();
+        let params = params.to_vec();
+        let strip_tz = self.strip_tz;
+        let (tx, stream) = RowStream::channel();
+        tokio::spawn(async move {
+            let q = MySqlAdapter::bind(sqlx::query(&sql), &params);
+            let mut rows = q.fetch(&pool);
+            while let Some(item) = rows.next().await {
+                let msg = match item {
+                    Ok(row) => MySqlRowRef {
+                        row: &row,
+                        strip_tz,
+                    }
+                    .try_into(),
+                    Err(e) => Err(adapter_err(e)),
+                };
+                let is_err = msg.is_err();
+                if tx.send(msg).await.is_err() || is_err {
+                    break;
+                }
+            }
+        });
+        stream
     }
 
     async fn begin(&self) -> Result<Box<dyn DbTransaction>> {
