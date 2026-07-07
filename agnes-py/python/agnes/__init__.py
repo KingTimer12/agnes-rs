@@ -5,6 +5,7 @@ relations and cache; synchronous API.
 """
 
 from .client import AgnesClient, TransactionClient
+from .ddl import create_table_sql, generate_schema_ddl
 from .query import (
     DeleteBuilder,
     InsertBuilder,
@@ -101,4 +102,6 @@ __all__ = [
     "InsertBuilder",
     "UpdateBuilder",
     "DeleteBuilder",
+    "generate_schema_ddl",
+    "create_table_sql",
 ]

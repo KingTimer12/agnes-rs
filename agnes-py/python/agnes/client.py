@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List, Optional, TypeVar
 
 from ._native import Database
+from .ddl import generate_schema_ddl
 from .query import DeleteBuilder, InsertBuilder, SelectBuilder, UpdateBuilder
 from .schema import Schema, TableEntry, flatten_schema
 
@@ -73,6 +74,18 @@ class AgnesClient(_ClientBase):
         """
         db = Database.connect(config)
         return cls(db, flatten_schema(schema), config["driver"])
+
+    def schema_ddl(self) -> List[str]:
+        """DDL statements push_schema() would run (for inspection / migrations).
+        All use IF NOT EXISTS."""
+        return generate_schema_ddl(self._dialect, self._schema)
+
+    def push_schema(self) -> None:
+        """Create every table and index in the schema that doesn't already exist
+        (idempotent). Never alters or drops. Runs sequentially, dependency-ordered
+        so foreign-key targets exist first."""
+        for sql in self.schema_ddl():
+            self._runner.mutate(sql)
 
     def transaction(self, fn: Callable[[TransactionClient], T]) -> T:
         """Run `fn` inside a transaction. Commits when it returns; rolls back and

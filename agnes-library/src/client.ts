@@ -16,6 +16,7 @@ import {
 } from "./schema";
 import type { Dialect } from "./query/builder";
 import { SelectBuilder, InsertBuilder, UpdateBuilder, DeleteBuilder } from "./query/builder";
+import { generateSchemaDdl } from "./query/ddl";
 
 /** Query surface shared by the client and a transaction — builds against any runner. */
 class ClientBase<S extends Schema> {
@@ -78,6 +79,26 @@ export class AgnesClient<S extends Schema> extends ClientBase<S> {
   ): Promise<AgnesClient<FlattenSchema<I>>> {
     const rust = await connectRust(config);
     return new AgnesClient(rust, flattenSchema(schema) as FlattenSchema<I>, config.driver);
+  }
+
+  /**
+   * The DDL statements that {@link pushSchema} would run, for inspection or a
+   * migration file. All use `IF NOT EXISTS`.
+   */
+  schemaDdl(): string[] {
+    return generateSchemaDdl(this.dialect, this.schema);
+  }
+
+  /**
+   * Create every table and index in the schema that doesn't already exist
+   * (idempotent "schema push"). Does not alter or drop existing objects. Runs
+   * the statements sequentially, dependency-ordered so foreign-key targets
+   * exist first.
+   */
+  async pushSchema(): Promise<void> {
+    for (const sql of this.schemaDdl()) {
+      await this.mutate(sql);
+    }
   }
 
   /**

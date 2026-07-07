@@ -11,4 +11,5 @@ export type {
   JoinType, RelationQuery, IncludeValue,
   Condition, WhereOp, Aggregate, AggFn, AggregateRow,
 } from "./query/builder";
+export { generateSchemaDdl, createTableSql } from "./query/ddl";
 export type { DatabaseConfig, QueryOpts, CacheConfig } from "./bridge";

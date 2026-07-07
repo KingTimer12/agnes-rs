@@ -101,6 +101,21 @@ db.query("SELECT * FROM users WHERE age > $1", [18], {"ttl": 30})
 db.mutate("UPDATE users SET active = $1 WHERE id = $2", [False, 1])
 ```
 
+## Schema push
+
+Create the tables and indexes the schema describes — idempotent (`CREATE ...
+IF NOT EXISTS`), dependency-ordered so foreign-key targets come first. Only
+creates what's missing; never alters or drops (diff migrations are separate).
+
+```python
+db.push_schema()          # create missing tables + indexes
+sql = db.schema_ddl()     # inspect the statements (list[str])
+```
+
+Types map per-dialect; `.autoincrement()` → `SERIAL` / `AUTO_INCREMENT` /
+`INTEGER PRIMARY KEY AUTOINCREMENT`; `one(...)` relations emit `FOREIGN KEY`
+constraints with their on-update/delete actions.
+
 ## Transactions
 
 Interactive transactions, Prisma-style. `db.transaction(fn)` calls `fn(tx)` with

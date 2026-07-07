@@ -243,6 +243,26 @@ const affected = await db.mutate("UPDATE users SET active = $1", [false]);
 
 ---
 
+## Schema push
+
+Create the tables and indexes your schema describes — idempotent, so it's safe
+to run on every boot. It emits `CREATE TABLE / INDEX IF NOT EXISTS`, ordered so
+foreign-key targets come first. It **only creates what's missing** — it never
+alters or drops existing objects (full diff migrations are a separate feature).
+
+```ts
+await db.pushSchema();          // create missing tables + indexes
+const sql = db.schemaDdl();     // inspect the statements (e.g. for a migration file)
+```
+
+Type mapping is per-dialect (`int → SERIAL/INT/INTEGER`, `bool → BOOLEAN/TINYINT(1)/INTEGER`,
+`json → JSONB/JSON/TEXT`, …). `.autoincrement()` becomes `SERIAL` (Postgres),
+`AUTO_INCREMENT` (MySQL), or `INTEGER PRIMARY KEY AUTOINCREMENT` (SQLite);
+`one(...)` relations emit `FOREIGN KEY` constraints with their `ON UPDATE/DELETE`
+actions.
+
+---
+
 ## Caching
 
 Reads are cached transparently in the Rust core:
