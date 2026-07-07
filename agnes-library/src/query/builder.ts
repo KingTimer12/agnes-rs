@@ -24,6 +24,16 @@ function ident(dialect: Dialect, name: string): string {
   return name.includes(".") ? name.split(".").map(q).join(".") : q(name);
 }
 
+/** RETURNING clause. Throws on MySQL, which has no RETURNING. */
+function returningClause(dialect: Dialect, returning: string[] | "*" | undefined): string {
+  if (!returning) return "";
+  if (dialect === "mysql") {
+    throw new Error("RETURNING is not supported on MySQL; use a follow-up SELECT instead");
+  }
+  const cols = returning === "*" ? "*" : returning.map((c) => ident(dialect, c)).join(", ");
+  return ` RETURNING ${cols}`;
+}
+
 export type WhereOp = "=" | "!=" | ">" | ">=" | "<" | "<=" | "like";
 
 /**
@@ -629,10 +639,11 @@ function maxVars(dialect: Dialect): number {
   return dialect === "sqlite" ? 900 : 60000;
 }
 
-export class InsertBuilder<T extends TableDef> {
+export class InsertBuilder<T extends TableDef, R = number> {
   private _conflictCols?: string[];
   private _mode: ConflictMode = "none";
   private _mergeCols?: string[];
+  private _returning?: string[] | "*";
 
   constructor(
     private readonly db: QueryRunner,
@@ -665,6 +676,16 @@ export class InsertBuilder<T extends TableDef> {
     this._mode = "merge";
     if (cols.length > 0) this._mergeCols = cols.map((c) => c.name);
     return this;
+  }
+
+  /**
+   * Return the inserted rows instead of an affected-row count (Postgres/SQLite
+   * `RETURNING`). No args returns every column; otherwise only the given ones.
+   * After this, `.values()` resolves to the row array. Throws on MySQL.
+   */
+  returning(...cols: Column<unknown, boolean>[]): InsertBuilder<T, InferRow<T>[]> {
+    this._returning = cols.length > 0 ? cols.map((c) => c.name) : "*";
+    return this as unknown as InsertBuilder<T, InferRow<T>[]>;
   }
 
   private conflictClause(insertedCols: string[]): string {
@@ -708,6 +729,7 @@ export class InsertBuilder<T extends TableDef> {
       `${keyword} ${ident(d, this.tableName)} ` +
       `(${physCols.map((c) => ident(d, c)).join(", ")}) VALUES ${tuples.join(", ")}`;
     sql += this.conflictClause(physCols);
+    sql += returningClause(d, this._returning);
     return { sql, params };
   }
 
@@ -717,9 +739,9 @@ export class InsertBuilder<T extends TableDef> {
    * separate statements — wrap in `db.transaction` for all-or-nothing. Returns
    * the total affected-row count.
    */
-  async values(rowOrRows: InferInsert<T> | InferInsert<T>[]): Promise<number> {
+  async values(rowOrRows: InferInsert<T> | InferInsert<T>[]): Promise<R> {
     const rows = (Array.isArray(rowOrRows) ? rowOrRows : [rowOrRows]) as Record<string, unknown>[];
-    if (rows.length === 0) return 0;
+    if (rows.length === 0) return (this._returning ? [] : 0) as R;
 
     // Union of keys across rows, preserving first-seen order. Missing keys in a
     // given row insert as NULL so every tuple has the same arity.
@@ -733,23 +755,34 @@ export class InsertBuilder<T extends TableDef> {
         }
       }
     }
-    if (colKeys.length === 0) return 0;
+    if (colKeys.length === 0) return (this._returning ? [] : 0) as R;
 
     const rowsPerChunk = Math.max(1, Math.floor(maxVars(this.dialect) / colKeys.length));
+
+    if (this._returning) {
+      const out: unknown[] = [];
+      for (let i = 0; i < rows.length; i += rowsPerChunk) {
+        const { sql, params } = this.buildStatement(rows.slice(i, i + rowsPerChunk), colKeys);
+        out.push(...((await this.db.query(sql, params)) as unknown[]));
+      }
+      return out as R;
+    }
+
     let affected = 0;
     for (let i = 0; i < rows.length; i += rowsPerChunk) {
       const chunk = rows.slice(i, i + rowsPerChunk);
       const { sql, params } = this.buildStatement(chunk, colKeys);
       affected += await this.db.mutate(sql, params);
     }
-    return affected;
+    return affected as R;
   }
 }
 
 // ─── UpdateBuilder ────────────────────────────────────────────────────────────
 
-export class UpdateBuilder<T extends TableDef> {
+export class UpdateBuilder<T extends TableDef, R = number> {
   private conds: Condition[] = [];
+  private _returning?: string[] | "*";
 
   constructor(
     private readonly db: QueryRunner,
@@ -764,7 +797,16 @@ export class UpdateBuilder<T extends TableDef> {
     return this;
   }
 
-  async run(): Promise<number> {
+  /**
+   * Return the updated rows instead of an affected-row count (Postgres/SQLite
+   * `RETURNING`). No args returns every column. Throws on MySQL.
+   */
+  returning(...cols: Column<unknown, boolean>[]): UpdateBuilder<T, InferRow<T>[]> {
+    this._returning = cols.length > 0 ? cols.map((c) => c.name) : "*";
+    return this as unknown as UpdateBuilder<T, InferRow<T>[]>;
+  }
+
+  async run(): Promise<R> {
     const params: unknown[] = [];
     const def = this.def as Record<string, { _kind: string; name: string }>;
     const setParts = Object.entries(this.patch as Record<string, unknown>).map(([k, v]) => {
@@ -774,14 +816,17 @@ export class UpdateBuilder<T extends TableDef> {
     });
     let sql = `UPDATE ${ident(this.dialect, this.tableName)} SET ${setParts.join(", ")}`;
     sql += buildWhere(this.dialect, this.conds, params);
-    return this.db.mutate(sql, params);
+    sql += returningClause(this.dialect, this._returning);
+    if (this._returning) return (await this.db.query(sql, params)) as R;
+    return (await this.db.mutate(sql, params)) as R;
   }
 }
 
 // ─── DeleteBuilder ────────────────────────────────────────────────────────────
 
-export class DeleteBuilder<T extends TableDef> {
+export class DeleteBuilder<T extends TableDef, R = number> {
   private conds: Condition[] = [];
+  private _returning?: string[] | "*";
 
   constructor(
     private readonly db: QueryRunner,
@@ -795,11 +840,22 @@ export class DeleteBuilder<T extends TableDef> {
     return this;
   }
 
-  async run(): Promise<number> {
+  /**
+   * Return the deleted rows instead of an affected-row count (Postgres/SQLite
+   * `RETURNING`). No args returns every column. Throws on MySQL.
+   */
+  returning(...cols: Column<unknown, boolean>[]): DeleteBuilder<T, InferRow<T>[]> {
+    this._returning = cols.length > 0 ? cols.map((c) => c.name) : "*";
+    return this as unknown as DeleteBuilder<T, InferRow<T>[]>;
+  }
+
+  async run(): Promise<R> {
     const params: unknown[] = [];
     let sql = `DELETE FROM ${ident(this.dialect, this.tableName)}`;
     sql += buildWhere(this.dialect, this.conds, params);
-    return this.db.mutate(sql, params);
+    sql += returningClause(this.dialect, this._returning);
+    if (this._returning) return (await this.db.query(sql, params)) as R;
+    return (await this.db.mutate(sql, params)) as R;
   }
 }
 

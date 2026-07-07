@@ -3,6 +3,8 @@ import { table, int, text, float, columnsOf } from "../src/schema";
 import {
   SelectBuilder,
   InsertBuilder,
+  UpdateBuilder,
+  DeleteBuilder,
   eq, gt, ilike, inArray, notInArray, isNull, isNotNull, between, and, or, not,
   count, sum, avg,
 } from "../src/query/builder";
@@ -196,6 +198,59 @@ test("upsert ignore (sqlite) and mysql prefix", async () => {
   expect(myMerge.calls[0]!.sql).toBe(
     "INSERT INTO `orders` (`id`, `total`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `total` = VALUES(`total`)",
   );
+});
+
+// ─── RETURNING ────────────────────────────────────────────────────────────────
+
+function returningCapture() {
+  const calls: { sql: string; params: unknown[] }[] = [];
+  const runner: QueryRunner = {
+    async query(sql, params) {
+      calls.push({ sql, params: params ?? [] });
+      return [{ id: 1, total: 9 }];
+    },
+    async mutate() {
+      return 1;
+    },
+  };
+  return { runner, calls };
+}
+
+test("insert .returning() runs a query with RETURNING and yields rows", async () => {
+  const { runner, calls } = returningCapture();
+  const rows = await new InsertBuilder(runner, "orders", orderTbl.def, "postgres")
+    .returning()
+    .values({ userId: 1, total: 9 });
+  expect(calls[0]!.sql).toBe(
+    `INSERT INTO "orders" ("user_id", "total") VALUES ($1, $2) RETURNING *`,
+  );
+  expect(rows).toEqual([{ id: 1, total: 9 }] as unknown as typeof rows);
+});
+
+test("update/delete .returning(cols) selects those columns", async () => {
+  const u = returningCapture();
+  await new UpdateBuilder(u.runner, "orders", orderTbl.def, { status: "paid" }, "postgres")
+    .where(eq(o.id, 1))
+    .returning(o.id, o.total)
+    .run();
+  expect(u.calls[0]!.sql).toBe(
+    `UPDATE "orders" SET "status" = $1 WHERE "id" = $2 RETURNING "id", "total"`,
+  );
+
+  const d = returningCapture();
+  await new DeleteBuilder(d.runner, "orders", orderTbl.def, "postgres")
+    .where(eq(o.id, 1))
+    .returning()
+    .run();
+  expect(d.calls[0]!.sql).toBe(`DELETE FROM "orders" WHERE "id" = $1 RETURNING *`);
+});
+
+test("returning throws on mysql", async () => {
+  await expect(
+    new DeleteBuilder(returningCapture().runner, "orders", orderTbl.def, "mysql")
+      .returning()
+      .run(),
+  ).rejects.toThrow(/not supported on MySQL/);
 });
 
 test("bulk insert chunks by param limit (sqlite)", async () => {

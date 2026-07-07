@@ -14,8 +14,10 @@ sys.modules.setdefault("agnes._native", _stub)
 
 # Import from submodules directly so the test needs no compiled `_native`.
 from agnes.query import (  # noqa: E402
+    DeleteBuilder,
     InsertBuilder,
     SelectBuilder,
+    UpdateBuilder,
     avg,
     between,
     count,
@@ -34,13 +36,14 @@ from agnes.schema import table, int_, text, float_  # noqa: E402
 
 
 class FakeRunner:
-    def __init__(self):
+    def __init__(self, query_result=None):
         self.calls = []
         self.mutations = []
+        self.query_result = query_result if query_result is not None else []
 
     def query(self, sql, params=None, opts=None):
         self.calls.append((sql, params or []))
-        return []
+        return self.query_result
 
     def mutate(self, sql, params=None):
         self.mutations.append((sql, params or []))
@@ -170,6 +173,37 @@ def test_upsert_ignore_and_mysql():
         "INSERT INTO `orders` (`id`, `total`) VALUES (?, ?) "
         "ON DUPLICATE KEY UPDATE `total` = VALUES(`total`)"
     )
+
+
+def test_insert_returning():
+    r = FakeRunner(query_result=[{"id": 1, "total": 9}])
+    b = InsertBuilder(r, "orders", C, "postgres")
+    rows = b.returning().values({"userId": 1, "total": 9})
+    assert r.calls[0][0] == 'INSERT INTO "orders" ("user_id", "total") VALUES ($1, $2) RETURNING *'
+    assert rows == [{"id": 1, "total": 9}]
+    assert r.mutations == []
+
+
+def test_update_delete_returning():
+    r = FakeRunner()
+    UpdateBuilder(r, "orders", C, {"status": "paid"}, "postgres").where(eq(C["id"], 1)).returning(
+        C["id"], C["total"]
+    ).run()
+    assert r.calls[0][0] == 'UPDATE "orders" SET "status" = $1 WHERE "id" = $2 RETURNING "id", "total"'
+
+    r2 = FakeRunner()
+    DeleteBuilder(r2, "orders", C, "postgres").where(eq(C["id"], 1)).returning().run()
+    assert r2.calls[0][0] == 'DELETE FROM "orders" WHERE "id" = $1 RETURNING *'
+
+
+def test_returning_raises_on_mysql():
+    r = FakeRunner()
+    raised = False
+    try:
+        DeleteBuilder(r, "orders", C, "mysql").returning().run()
+    except ValueError as e:
+        raised = "not supported on MySQL" in str(e)
+    assert raised
 
 
 def test_insert_chunks():

@@ -229,6 +229,16 @@ await db.insertInto("user").onConflict(u.id).ignore().values({ id: 1, name: "Ana
 `.merge()` with no args updates every inserted column except the conflict
 target. MySQL ignores the `onConflict` target and matches on its unique keys.
 
+**Returning rows** — `.returning(...cols)` on insert/update/delete returns the
+affected rows instead of a count (Postgres/SQLite `RETURNING`; no args = every
+column). Throws on MySQL.
+
+```ts
+const [created] = await db.insertInto("user").returning().values({ name: "Ana" });
+const updated = await db.update("user", { age: 31 }).where(eq(u.id, 5)).returning(u.id, u.age).run();
+const deleted = await db.deleteFrom("post").where(eq(p.id, 9)).returning().run();
+```
+
 ### Raw SQL
 
 ```ts

@@ -96,6 +96,11 @@ db.insert_into("user").on_conflict(U.id).ignore().values({"id": 1, "name": "Ana"
 db.update("user", {"active": False}).where(eq(U.id, 1)).run()
 db.delete_from("post").where(eq(db._schema["post"].c.id, 2)).run()
 
+# returning() — get the affected rows back (Postgres/SQLite; raises on MySQL)
+created = db.insert_into("user").returning().values({"name": "Ana"})
+updated = db.update("user", {"age": 31}).where(eq(U.id, 5)).returning(U.id, U.age).run()
+deleted = db.delete_from("post").where(eq(P.id, 9)).returning().run()
+
 # raw SQL fallback
 db.query("SELECT * FROM users WHERE age > $1", [18], {"ttl": 30})
 db.mutate("UPDATE users SET active = $1 WHERE id = $2", [False, 1])

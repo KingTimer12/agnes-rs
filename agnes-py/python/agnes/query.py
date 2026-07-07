@@ -24,6 +24,16 @@ def ident(dialect: Dialect, name: str) -> str:
 # A WHERE predicate is a dict tagged by "kind": a leaf (cmp/in/null/between/
 # ilike) or a combinator (not/group). Build leaves with eq/gt/in_array/… and
 # nest with and_(...)/or_(...)/not_(...). where(a, b) still means a AND b.
+def _returning_clause(dialect: Dialect, returning) -> str:
+    """RETURNING clause. Raises on MySQL, which has no RETURNING."""
+    if not returning:
+        return ""
+    if dialect == "mysql":
+        raise ValueError("RETURNING is not supported on MySQL; use a follow-up SELECT instead")
+    cols = "*" if returning == "*" else ", ".join(ident(dialect, c) for c in returning)
+    return f" RETURNING {cols}"
+
+
 Condition = Dict[str, Any]
 
 
@@ -491,6 +501,13 @@ class InsertBuilder:
         self._conflict_cols: Optional[List[str]] = None
         self._mode = "none"  # "none" | "ignore" | "merge"
         self._merge_cols: Optional[List[str]] = None
+        self._returning = None  # None | "*" | List[str]
+
+    def returning(self, *cols: Column) -> "InsertBuilder":
+        """Return the inserted rows instead of a count (Postgres/SQLite
+        RETURNING). No args returns every column. Raises on MySQL."""
+        self._returning = [c.name for c in cols] if cols else "*"
+        return self
 
     def on_conflict(self, *cols: Column) -> "InsertBuilder":
         """Conflict target columns (Postgres/SQLite ON CONFLICT (...)). MySQL
@@ -551,16 +568,17 @@ class InsertBuilder:
             f"({', '.join(ident(d, c) for c in phys_cols)}) VALUES {', '.join(tuples)}"
         )
         sql += self._conflict_clause(phys_cols)
+        sql += _returning_clause(d, self._returning)
         return sql, params
 
-    def values(self, row_or_rows) -> int:
+    def values(self, row_or_rows):
         """Insert one row (dict) or many (list of dicts). Multi-row inserts go in
         one statement, chunked to respect the driver's parameter limit. Chunks
         are separate statements — wrap in db.transaction for all-or-nothing.
-        Returns total affected rows."""
+        Returns total affected rows, or the inserted rows if returning() was set."""
         rows = row_or_rows if isinstance(row_or_rows, list) else [row_or_rows]
         if not rows:
-            return 0
+            return [] if self._returning else 0
 
         # Union of keys across rows, first-seen order. Missing keys insert NULL.
         col_keys: List[str] = []
@@ -571,9 +589,17 @@ class InsertBuilder:
                     seen.add(k)
                     col_keys.append(k)
         if not col_keys:
-            return 0
+            return [] if self._returning else 0
 
         rows_per_chunk = max(1, _max_vars(self._dialect) // len(col_keys))
+
+        if self._returning:
+            out: List[Dict[str, Any]] = []
+            for i in range(0, len(rows), rows_per_chunk):
+                sql, params = self._build_statement(rows[i : i + rows_per_chunk], col_keys)
+                out.extend(self._db.query(sql, params, None))
+            return out
+
         affected = 0
         for i in range(0, len(rows), rows_per_chunk):
             chunk = rows[i : i + rows_per_chunk]
@@ -590,12 +616,19 @@ class UpdateBuilder:
         self._patch = patch
         self._dialect = dialect
         self._conds: List[Condition] = []
+        self._returning = None
 
     def where(self, *cs: Condition) -> "UpdateBuilder":
         self._conds.extend(cs)
         return self
 
-    def run(self) -> int:
+    def returning(self, *cols: Column) -> "UpdateBuilder":
+        """Return the updated rows instead of a count (Postgres/SQLite
+        RETURNING). No args returns every column. Raises on MySQL."""
+        self._returning = [c.name for c in cols] if cols else "*"
+        return self
+
+    def run(self):
         d = self._dialect
         params: List[Any] = []
         set_parts = []
@@ -604,6 +637,9 @@ class UpdateBuilder:
             set_parts.append(f"{ident(d, _phys(self._def, k))} = {placeholder(d, len(params))}")
         sql = f"UPDATE {ident(d, self._table_name)} SET {', '.join(set_parts)}"
         sql += _build_where(d, self._conds, params)
+        sql += _returning_clause(d, self._returning)
+        if self._returning:
+            return self._db.query(sql, params, None)
         return self._db.mutate(sql, params)
 
 
@@ -614,14 +650,24 @@ class DeleteBuilder:
         self._def = definition
         self._dialect = dialect
         self._conds: List[Condition] = []
+        self._returning = None
 
     def where(self, *cs: Condition) -> "DeleteBuilder":
         self._conds.extend(cs)
         return self
 
-    def run(self) -> int:
+    def returning(self, *cols: Column) -> "DeleteBuilder":
+        """Return the deleted rows instead of a count (Postgres/SQLite
+        RETURNING). No args returns every column. Raises on MySQL."""
+        self._returning = [c.name for c in cols] if cols else "*"
+        return self
+
+    def run(self):
         d = self._dialect
         params: List[Any] = []
         sql = f"DELETE FROM {ident(d, self._table_name)}"
         sql += _build_where(d, self._conds, params)
+        sql += _returning_clause(d, self._returning)
+        if self._returning:
+            return self._db.query(sql, params, None)
         return self._db.mutate(sql, params)
