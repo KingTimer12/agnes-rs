@@ -24,42 +24,118 @@ function ident(dialect: Dialect, name: string): string {
   return name.includes(".") ? name.split(".").map(q).join(".") : q(name);
 }
 
-export type WhereOp = "=" | "!=" | ">" | ">=" | "<" | "<=" | "like" | "in";
+export type WhereOp = "=" | "!=" | ">" | ">=" | "<" | "<=" | "like";
 
-export interface Condition {
-  col: string;
-  op: WhereOp;
-  value: unknown;
-}
+/**
+ * A WHERE predicate. A tree of leaves (comparisons, IN, NULL, BETWEEN, ILIKE)
+ * and combinators (`and`/`or`/`not`). Build leaves with `eq`/`gt`/`inArray`/…
+ * and nest with `and(...)`/`or(...)`/`not(...)`. `where(a, b)` still means
+ * `a AND b`.
+ */
+export type Condition =
+  | { kind: "cmp"; col: string; op: WhereOp; value: unknown }
+  | { kind: "in"; col: string; values: unknown[]; negated: boolean }
+  | { kind: "null"; col: string; negated: boolean }
+  | { kind: "between"; col: string; lo: unknown; hi: unknown }
+  | { kind: "ilike"; col: string; value: string }
+  | { kind: "not"; child: Condition }
+  | { kind: "group"; op: "AND" | "OR"; children: Condition[] };
 
 export function eq<T>(col: Column<T, boolean>, value: T): Condition {
-  return { col: col.name, op: "=", value };
+  return { kind: "cmp", col: col.name, op: "=", value };
 }
 export function neq<T>(col: Column<T, boolean>, value: T): Condition {
-  return { col: col.name, op: "!=", value };
+  return { kind: "cmp", col: col.name, op: "!=", value };
 }
 export function gt<T>(col: Column<T, boolean>, value: T): Condition {
-  return { col: col.name, op: ">", value };
+  return { kind: "cmp", col: col.name, op: ">", value };
 }
 export function gte<T>(col: Column<T, boolean>, value: T): Condition {
-  return { col: col.name, op: ">=", value };
+  return { kind: "cmp", col: col.name, op: ">=", value };
 }
 export function lt<T>(col: Column<T, boolean>, value: T): Condition {
-  return { col: col.name, op: "<", value };
+  return { kind: "cmp", col: col.name, op: "<", value };
 }
 export function lte<T>(col: Column<T, boolean>, value: T): Condition {
-  return { col: col.name, op: "<=", value };
+  return { kind: "cmp", col: col.name, op: "<=", value };
 }
 export function like(col: Column<string, boolean>, value: string): Condition {
-  return { col: col.name, op: "like", value };
+  return { kind: "cmp", col: col.name, op: "like", value };
+}
+/** Case-insensitive LIKE. Postgres `ILIKE`; emulated with `LOWER()` elsewhere. */
+export function ilike(col: Column<string, boolean>, value: string): Condition {
+  return { kind: "ilike", col: col.name, value };
+}
+/** `col IN (…)`. An empty list is always-false (never matches). */
+export function inArray<T>(col: Column<T, boolean>, values: T[]): Condition {
+  return { kind: "in", col: col.name, values, negated: false };
+}
+/** `col NOT IN (…)`. An empty list is always-true (matches every row). */
+export function notInArray<T>(col: Column<T, boolean>, values: T[]): Condition {
+  return { kind: "in", col: col.name, values, negated: true };
+}
+export function isNull(col: Column<unknown, boolean>): Condition {
+  return { kind: "null", col: col.name, negated: false };
+}
+export function isNotNull(col: Column<unknown, boolean>): Condition {
+  return { kind: "null", col: col.name, negated: true };
+}
+export function between<T>(col: Column<T, boolean>, lo: T, hi: T): Condition {
+  return { kind: "between", col: col.name, lo, hi };
+}
+export function and(...children: Condition[]): Condition {
+  return { kind: "group", op: "AND", children };
+}
+export function or(...children: Condition[]): Condition {
+  return { kind: "group", op: "OR", children };
+}
+export function not(child: Condition): Condition {
+  return { kind: "not", child };
+}
+
+/** Render one predicate, pushing its bound values onto `params`. */
+export function renderCondition(dialect: Dialect, c: Condition, params: unknown[]): string {
+  switch (c.kind) {
+    case "cmp": {
+      params.push(c.value);
+      return `${ident(dialect, c.col)} ${c.op} ${placeholder(dialect, params.length)}`;
+    }
+    case "in": {
+      if (c.values.length === 0) return c.negated ? "1 = 1" : "1 = 0";
+      const phs = c.values.map((v) => {
+        params.push(v);
+        return placeholder(dialect, params.length);
+      });
+      return `${ident(dialect, c.col)} ${c.negated ? "NOT IN" : "IN"} (${phs.join(", ")})`;
+    }
+    case "null":
+      return `${ident(dialect, c.col)} IS ${c.negated ? "NOT " : ""}NULL`;
+    case "between": {
+      params.push(c.lo);
+      const lo = placeholder(dialect, params.length);
+      params.push(c.hi);
+      const hi = placeholder(dialect, params.length);
+      return `${ident(dialect, c.col)} BETWEEN ${lo} AND ${hi}`;
+    }
+    case "ilike": {
+      params.push(c.value);
+      const ph = placeholder(dialect, params.length);
+      return dialect === "postgres"
+        ? `${ident(dialect, c.col)} ILIKE ${ph}`
+        : `LOWER(${ident(dialect, c.col)}) LIKE LOWER(${ph})`;
+    }
+    case "not":
+      return `NOT (${renderCondition(dialect, c.child, params)})`;
+    case "group": {
+      if (c.children.length === 0) return c.op === "AND" ? "1 = 1" : "1 = 0";
+      return `(${c.children.map((ch) => renderCondition(dialect, ch, params)).join(` ${c.op} `)})`;
+    }
+  }
 }
 
 function buildWhere(dialect: Dialect, conds: Condition[], params: unknown[]): string {
   if (conds.length === 0) return "";
-  const parts = conds.map((c) => {
-    params.push(c.value);
-    return `${ident(dialect, c.col)} ${c.op} ${placeholder(dialect, params.length)}`;
-  });
+  const parts = conds.map((c) => renderCondition(dialect, c, params));
   return ` WHERE ${parts.join(" AND ")}`;
 }
 
@@ -132,6 +208,49 @@ export function on(
   return [mainTableCol, joinedTableCol];
 }
 
+// ─── Aggregations ─────────────────────────────────────────────────────────────
+
+export type AggFn = "count" | "sum" | "avg" | "min" | "max";
+
+export interface Aggregate {
+  fn: AggFn;
+  /** Physical column name, or "*" for COUNT(*). */
+  col: string;
+}
+
+/** `COUNT(col)`, or `COUNT(*)` when called with no column. */
+export function count(col?: Column<unknown, boolean>): Aggregate {
+  return { fn: "count", col: col ? col.name : "*" };
+}
+export function sum(col: Column<unknown, boolean>): Aggregate {
+  return { fn: "sum", col: col.name };
+}
+export function avg(col: Column<unknown, boolean>): Aggregate {
+  return { fn: "avg", col: col.name };
+}
+export function min(col: Column<unknown, boolean>): Aggregate {
+  return { fn: "min", col: col.name };
+}
+export function max(col: Column<unknown, boolean>): Aggregate {
+  return { fn: "max", col: col.name };
+}
+
+function renderAgg(dialect: Dialect, a: Aggregate): string {
+  const inner = a.col === "*" ? "*" : ident(dialect, a.col);
+  return `${a.fn.toUpperCase()}(${inner})`;
+}
+
+interface HavingClause {
+  agg: Aggregate;
+  op: WhereOp;
+  value: unknown;
+}
+
+/** Row shape returned by `.aggregate()`: the aliases plus any grouped columns. */
+export type AggregateRow<A extends Record<string, Aggregate>> = {
+  [K in keyof A]: number | null;
+} & Record<string, unknown>;
+
 // ─── SelectBuilder ────────────────────────────────────────────────────────────
 
 export class SelectBuilder<
@@ -146,6 +265,8 @@ export class SelectBuilder<
   private opts: QueryOpts = {};
   private _includes: Partial<Record<string, IncludeValue>> = {};
   private _joins: SqlJoinClause[] = [];
+  private _groupBy: string[] = [];
+  private _having: HavingClause[] = [];
 
   constructor(
     private readonly db: QueryRunner,
@@ -230,10 +351,20 @@ export class SelectBuilder<
     return this;
   }
 
-  build(): { sql: string; params: unknown[] } {
-    const params: unknown[] = [];
-    let sql = `SELECT * FROM ${ident(this.dialect, this.tableName)}`;
+  /** Group aggregate results by these columns (used with `.aggregate()`). */
+  groupBy(...cols: Column<unknown, boolean>[]): this {
+    this._groupBy.push(...cols.map((c) => c.name));
+    return this;
+  }
 
+  /** Filter grouped rows by an aggregate, e.g. `.having(sum(o.total), ">", 100)`. */
+  having(agg: Aggregate, op: WhereOp, value: unknown): this {
+    this._having.push({ agg, op, value });
+    return this;
+  }
+
+  private buildJoins(): string {
+    let sql = "";
     for (const j of this._joins) {
       const keyword = j.type === "full" ? "FULL OUTER" : j.type.toUpperCase();
       const joinTableName = (this.schema[j.table] as TableEntry<TableDef> | undefined)?.tableName ?? j.table;
@@ -241,7 +372,13 @@ export class SelectBuilder<
       sql += ` ON ${ident(this.dialect, this.tableName)}.${ident(this.dialect, j.leftCol)}`;
       sql += ` = ${ident(this.dialect, joinTableName)}.${ident(this.dialect, j.rightCol)}`;
     }
+    return sql;
+  }
 
+  build(): { sql: string; params: unknown[] } {
+    const params: unknown[] = [];
+    let sql = `SELECT * FROM ${ident(this.dialect, this.tableName)}`;
+    sql += this.buildJoins();
     sql += buildWhere(this.dialect, this.conds, params);
     if (this.orderByCol) {
       sql += ` ORDER BY ${ident(this.dialect, this.orderByCol)} ${this.orderDir.toUpperCase()}`;
@@ -250,6 +387,49 @@ export class SelectBuilder<
       sql += ` LIMIT ${this.limitN}`;
     }
     return { sql, params };
+  }
+
+  /**
+   * Run an aggregate query. Selects the grouped columns (from `.groupBy()`)
+   * plus one column per alias in `aggs`. Honors `.where()`, `.having()`,
+   * `.orderBy()` and `.limit()`.
+   *
+   * ```ts
+   * await db.select("order")
+   *   .where(gt(o.total, 0))
+   *   .groupBy(o.userId)
+   *   .having(sum(o.total), ">", 100)
+   *   .aggregate({ spent: sum(o.total), orders: count() });
+   * // → { userId: ...; spent: number | null; orders: number | null }[]
+   * ```
+   */
+  async aggregate<A extends Record<string, Aggregate>>(aggs: A): Promise<AggregateRow<A>[]> {
+    const params: unknown[] = [];
+    const d = this.dialect;
+    const selectParts = [
+      ...this._groupBy.map((g) => ident(d, g)),
+      ...Object.entries(aggs).map(([alias, a]) => `${renderAgg(d, a)} AS ${ident(d, alias)}`),
+    ];
+    let sql = `SELECT ${selectParts.join(", ")} FROM ${ident(d, this.tableName)}`;
+    sql += this.buildJoins();
+    sql += buildWhere(d, this.conds, params);
+    if (this._groupBy.length > 0) {
+      sql += ` GROUP BY ${this._groupBy.map((g) => ident(d, g)).join(", ")}`;
+    }
+    if (this._having.length > 0) {
+      const parts = this._having.map((h) => {
+        params.push(h.value);
+        return `${renderAgg(d, h.agg)} ${h.op} ${placeholder(d, params.length)}`;
+      });
+      sql += ` HAVING ${parts.join(" AND ")}`;
+    }
+    if (this.orderByCol) {
+      sql += ` ORDER BY ${ident(d, this.orderByCol)} ${this.orderDir.toUpperCase()}`;
+    }
+    if (this.limitN !== undefined) {
+      sql += ` LIMIT ${this.limitN}`;
+    }
+    return (await this.db.query(sql, params, this.opts)) as AggregateRow<A>[];
   }
 
   async all(): Promise<(InferRow<T> & ResolveIncludes<T, S, Inc>)[]> {
@@ -341,8 +521,7 @@ export class SelectBuilder<
     // Build WHERE clause: FK IN (...) + extra conditions from RelationQuery
     let baseWhere = `${ident(this.dialect, fkColName)} IN (${ph})`;
     for (const cond of rq._conds) {
-      params.push(cond.value);
-      baseWhere += ` AND ${ident(this.dialect, cond.col)} ${cond.op} ${placeholder(this.dialect, params.length)}`;
+      baseWhere += ` AND ${renderCondition(this.dialect, cond, params)}`;
     }
 
     let sql: string;
@@ -422,8 +601,7 @@ export class SelectBuilder<
     sql += ` WHERE ${ident(this.dialect, targetColName)} IN (${ph})`;
 
     for (const cond of rq._conds) {
-      params.push(cond.value);
-      sql += ` AND ${ident(this.dialect, cond.col)} ${cond.op} ${placeholder(this.dialect, params.length)}`;
+      sql += ` AND ${renderCondition(this.dialect, cond, params)}`;
     }
     if (rq._orderByCol) {
       sql += ` ORDER BY ${ident(this.dialect, rq._orderByCol)} ${rq._orderDir.toUpperCase()}`;

@@ -21,45 +21,156 @@ def ident(dialect: Dialect, name: str) -> str:
     return ".".join(q(p) for p in name.split(".")) if "." in name else q(name)
 
 
-Condition = Dict[str, Any]  # {"col": str, "op": str, "value": Any}
+# A WHERE predicate is a dict tagged by "kind": a leaf (cmp/in/null/between/
+# ilike) or a combinator (not/group). Build leaves with eq/gt/in_array/… and
+# nest with and_(...)/or_(...)/not_(...). where(a, b) still means a AND b.
+Condition = Dict[str, Any]
 
 
 def eq(col: Column, value: Any) -> Condition:
-    return {"col": col.name, "op": "=", "value": value}
+    return {"kind": "cmp", "col": col.name, "op": "=", "value": value}
 
 
 def neq(col: Column, value: Any) -> Condition:
-    return {"col": col.name, "op": "!=", "value": value}
+    return {"kind": "cmp", "col": col.name, "op": "!=", "value": value}
 
 
 def gt(col: Column, value: Any) -> Condition:
-    return {"col": col.name, "op": ">", "value": value}
+    return {"kind": "cmp", "col": col.name, "op": ">", "value": value}
 
 
 def gte(col: Column, value: Any) -> Condition:
-    return {"col": col.name, "op": ">=", "value": value}
+    return {"kind": "cmp", "col": col.name, "op": ">=", "value": value}
 
 
 def lt(col: Column, value: Any) -> Condition:
-    return {"col": col.name, "op": "<", "value": value}
+    return {"kind": "cmp", "col": col.name, "op": "<", "value": value}
 
 
 def lte(col: Column, value: Any) -> Condition:
-    return {"col": col.name, "op": "<=", "value": value}
+    return {"kind": "cmp", "col": col.name, "op": "<=", "value": value}
 
 
 def like(col: Column, value: str) -> Condition:
-    return {"col": col.name, "op": "like", "value": value}
+    return {"kind": "cmp", "col": col.name, "op": "like", "value": value}
+
+
+def ilike(col: Column, value: str) -> Condition:
+    """Case-insensitive LIKE. Postgres ILIKE; emulated with LOWER() elsewhere."""
+    return {"kind": "ilike", "col": col.name, "value": value}
+
+
+def in_array(col: Column, values: List[Any]) -> Condition:
+    """col IN (…). An empty list is always-false (never matches)."""
+    return {"kind": "in", "col": col.name, "values": list(values), "negated": False}
+
+
+def not_in_array(col: Column, values: List[Any]) -> Condition:
+    """col NOT IN (…). An empty list is always-true (matches every row)."""
+    return {"kind": "in", "col": col.name, "values": list(values), "negated": True}
+
+
+def is_null(col: Column) -> Condition:
+    return {"kind": "null", "col": col.name, "negated": False}
+
+
+def is_not_null(col: Column) -> Condition:
+    return {"kind": "null", "col": col.name, "negated": True}
+
+
+def between(col: Column, lo: Any, hi: Any) -> Condition:
+    return {"kind": "between", "col": col.name, "lo": lo, "hi": hi}
+
+
+def and_(*children: Condition) -> Condition:
+    return {"kind": "group", "op": "AND", "children": list(children)}
+
+
+def or_(*children: Condition) -> Condition:
+    return {"kind": "group", "op": "OR", "children": list(children)}
+
+
+def not_(child: Condition) -> Condition:
+    return {"kind": "not", "child": child}
+
+
+def render_condition(dialect: Dialect, c: Condition, params: List[Any]) -> str:
+    """Render one predicate, appending its bound values onto params."""
+    kind = c.get("kind", "cmp")
+    if kind == "cmp":
+        params.append(c["value"])
+        return f"{ident(dialect, c['col'])} {c['op']} {placeholder(dialect, len(params))}"
+    if kind == "in":
+        values = c["values"]
+        if not values:
+            return "1 = 1" if c["negated"] else "1 = 0"
+        phs = []
+        for v in values:
+            params.append(v)
+            phs.append(placeholder(dialect, len(params)))
+        op = "NOT IN" if c["negated"] else "IN"
+        return f"{ident(dialect, c['col'])} {op} ({', '.join(phs)})"
+    if kind == "null":
+        neg = "NOT " if c["negated"] else ""
+        return f"{ident(dialect, c['col'])} IS {neg}NULL"
+    if kind == "between":
+        params.append(c["lo"])
+        lo = placeholder(dialect, len(params))
+        params.append(c["hi"])
+        hi = placeholder(dialect, len(params))
+        return f"{ident(dialect, c['col'])} BETWEEN {lo} AND {hi}"
+    if kind == "ilike":
+        params.append(c["value"])
+        ph = placeholder(dialect, len(params))
+        if dialect == "postgres":
+            return f"{ident(dialect, c['col'])} ILIKE {ph}"
+        return f"LOWER({ident(dialect, c['col'])}) LIKE LOWER({ph})"
+    if kind == "not":
+        return f"NOT ({render_condition(dialect, c['child'], params)})"
+    if kind == "group":
+        children = c["children"]
+        if not children:
+            return "1 = 1" if c["op"] == "AND" else "1 = 0"
+        inner = f" {c['op']} ".join(render_condition(dialect, ch, params) for ch in children)
+        return f"({inner})"
+    raise ValueError(f"unknown condition kind: {kind!r}")
 
 
 def _build_where(dialect: Dialect, conds: List[Condition], params: List[Any]) -> str:
     if not conds:
         return ""
-    parts = []
-    for c in conds:
-        params.append(c["value"])
-        parts.append(f"{ident(dialect, c['col'])} {c['op']} {placeholder(dialect, len(params))}")
+    parts = [render_condition(dialect, c, params) for c in conds]
     return " WHERE " + " AND ".join(parts)
+
+
+# ── Aggregations ─────────────────────────────────────────────────────────────
+Aggregate = Dict[str, Any]  # {"fn": str, "col": str}
+
+
+def count(col: Optional[Column] = None) -> Aggregate:
+    """COUNT(col), or COUNT(*) when called with no column."""
+    return {"fn": "count", "col": col.name if col is not None else "*"}
+
+
+def sum_(col: Column) -> Aggregate:
+    return {"fn": "sum", "col": col.name}
+
+
+def avg(col: Column) -> Aggregate:
+    return {"fn": "avg", "col": col.name}
+
+
+def min_(col: Column) -> Aggregate:
+    return {"fn": "min", "col": col.name}
+
+
+def max_(col: Column) -> Aggregate:
+    return {"fn": "max", "col": col.name}
+
+
+def _render_agg(dialect: Dialect, a: Aggregate) -> str:
+    inner = "*" if a["col"] == "*" else ident(dialect, a["col"])
+    return f"{a['fn'].upper()}({inner})"
 
 
 # ── RelationQuery (nested include: 2 queries + in-memory merge) ─────────────────
@@ -117,6 +228,8 @@ class SelectBuilder:
         self._opts: Dict[str, Any] = {}
         self._includes: Dict[str, Any] = {}
         self._joins: List[Dict[str, Any]] = []
+        self._group_by: List[str] = []
+        self._having: List[Dict[str, Any]] = []
 
     def where(self, *cs: Condition) -> "SelectBuilder":
         self._conds.extend(cs)
@@ -161,10 +274,19 @@ class SelectBuilder:
     def full_join(self, tbl: str, condition: Tuple[Column, Column]) -> "SelectBuilder":
         return self._join("full", tbl, condition)
 
-    def build(self) -> Tuple[str, List[Any]]:
-        params: List[Any] = []
+    def group_by(self, *cols: Column) -> "SelectBuilder":
+        """Group aggregate results by these columns (used with .aggregate())."""
+        self._group_by.extend(c.name for c in cols)
+        return self
+
+    def having(self, agg: Aggregate, op: str, value: Any) -> "SelectBuilder":
+        """Filter grouped rows by an aggregate, e.g. .having(sum_(o.total), ">", 100)."""
+        self._having.append({"agg": agg, "op": op, "value": value})
+        return self
+
+    def _build_joins(self) -> str:
         d = self._dialect
-        sql = f"SELECT * FROM {ident(d, self._table_name)}"
+        sql = ""
         for j in self._joins:
             keyword = "FULL OUTER" if j["type"] == "full" else j["type"].upper()
             entry = self._schema.get(j["table"])
@@ -172,12 +294,51 @@ class SelectBuilder:
             sql += f" {keyword} JOIN {ident(d, join_table)}"
             sql += f" ON {ident(d, self._table_name)}.{ident(d, j['left'])}"
             sql += f" = {ident(d, join_table)}.{ident(d, j['right'])}"
+        return sql
+
+    def build(self) -> Tuple[str, List[Any]]:
+        params: List[Any] = []
+        d = self._dialect
+        sql = f"SELECT * FROM {ident(d, self._table_name)}"
+        sql += self._build_joins()
         sql += _build_where(d, self._conds, params)
         if self._order_by_col:
             sql += f" ORDER BY {ident(d, self._order_by_col)} {self._order_dir.upper()}"
         if self._limit_n is not None:
             sql += f" LIMIT {self._limit_n}"
         return sql, params
+
+    def aggregate(self, aggs: Dict[str, Aggregate]) -> List[Dict[str, Any]]:
+        """Run an aggregate query. Selects the grouped columns (from group_by())
+        plus one column per alias in aggs. Honors where(), having(), order_by()
+        and limit().
+
+            db.select("order") \\
+              .where(gt(o.total, 0)) \\
+              .group_by(o.user_id) \\
+              .having(sum_(o.total), ">", 100) \\
+              .aggregate({"spent": sum_(o.total), "orders": count()})
+        """
+        d = self._dialect
+        params: List[Any] = []
+        select_parts = [ident(d, g) for g in self._group_by]
+        select_parts += [f"{_render_agg(d, a)} AS {ident(d, alias)}" for alias, a in aggs.items()]
+        sql = f"SELECT {', '.join(select_parts)} FROM {ident(d, self._table_name)}"
+        sql += self._build_joins()
+        sql += _build_where(d, self._conds, params)
+        if self._group_by:
+            sql += " GROUP BY " + ", ".join(ident(d, g) for g in self._group_by)
+        if self._having:
+            parts = []
+            for h in self._having:
+                params.append(h["value"])
+                parts.append(f"{_render_agg(d, h['agg'])} {h['op']} {placeholder(d, len(params))}")
+            sql += " HAVING " + " AND ".join(parts)
+        if self._order_by_col:
+            sql += f" ORDER BY {ident(d, self._order_by_col)} {self._order_dir.upper()}"
+        if self._limit_n is not None:
+            sql += f" LIMIT {self._limit_n}"
+        return self._db.query(sql, params, self._opts or None)
 
     def all(self) -> List[Dict[str, Any]]:
         sql, params = self.build()
@@ -237,8 +398,7 @@ class SelectBuilder:
 
         base_where = f"{ident(d, fk_col)} IN ({ph})"
         for cond in rq._conds:
-            params.append(cond["value"])
-            base_where += f" AND {ident(d, cond['col'])} {cond['op']} {placeholder(d, len(params))}"
+            base_where += f" AND {render_condition(d, cond, params)}"
 
         if rq._limit_n is not None:
             order_win = (
@@ -298,8 +458,7 @@ class SelectBuilder:
         sql = f"SELECT {select_list} FROM {ident(d, target.table_name)}"
         sql += f" WHERE {ident(d, target_col)} IN ({ph})"
         for cond in rq._conds:
-            params.append(cond["value"])
-            sql += f" AND {ident(d, cond['col'])} {cond['op']} {placeholder(d, len(params))}"
+            sql += f" AND {render_condition(d, cond, params)}"
         if rq._order_by_col:
             sql += f" ORDER BY {ident(d, rq._order_by_col)} {rq._order_dir.upper()}"
 

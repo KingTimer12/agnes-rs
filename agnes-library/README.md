@@ -154,8 +154,43 @@ await db.select("user").leftJoin("post", on(u.id, p.userId)).all();
 
 ### Conditions
 
-`eq` · `neq` · `gt` · `gte` · `lt` · `lte` · `like` — each takes a column handle
-and a value: `eq(u.id, 5)`.
+Leaves — a column handle and a value:
+
+`eq` · `neq` · `gt` · `gte` · `lt` · `lte` · `like` · `ilike` (case-insensitive) ·
+`inArray(col, [...])` · `notInArray(col, [...])` · `isNull(col)` · `isNotNull(col)` ·
+`between(col, lo, hi)`.
+
+Combine and nest with `and(...)` / `or(...)` / `not(...)`. `where(a, b)` still
+means `a AND b`.
+
+```ts
+await db.select("user").where(
+  eq(u.active, true),
+  or(inArray(u.role, ["admin", "mod"]), isNull(u.role)),
+  not(eq(u.age, 0)),
+).all();
+```
+
+`inArray([])` is always-false and `notInArray([])` always-true — no invalid `IN ()`.
+
+### Aggregations
+
+`count` · `sum` · `avg` · `min` · `max`, with `.groupBy(...)` and `.having(agg, op, value)`.
+Terminal `.aggregate({ alias: aggFn, ... })` returns one row per group.
+
+```ts
+import { count, sum, avg } from "agnes-library";
+
+const perUser = await db
+  .select("order")
+  .where(gt(o.total, 0))
+  .groupBy(o.userId)
+  .having(sum(o.total), ">", 100)
+  .aggregate({ spent: sum(o.total), orders: count(), avgTotal: avg(o.total) });
+// → { userId: ...; spent: number | null; orders: number | null; avgTotal: number | null }[]
+```
+
+`count()` with no argument is `COUNT(*)`.
 
 ### Insert / update / delete
 

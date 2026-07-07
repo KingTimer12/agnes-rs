@@ -107,6 +107,37 @@ def transfer(tx):
 db.transaction(transfer)
 ```
 
-Operators: `eq, neq, gt, gte, lt, lte, like`. `query()` (for `include`) has
-`.where`, `.order_by`, `.limit`, `.select(*cols)`, `.type("left"|"inner")`.
-SQL joins: `.left_join/.inner_join/.right_join/.full_join("tbl", on(a, b))`.
+Operators (leaves): `eq, neq, gt, gte, lt, lte, like, ilike`,
+`in_array(col, [...])`, `not_in_array(col, [...])`, `is_null(col)`,
+`is_not_null(col)`, `between(col, lo, hi)`. Combine/nest with `and_(...)`,
+`or_(...)`, `not_(...)`. `where(a, b)` means `a AND b`.
+
+```python
+from agnes import eq, or_, in_array, is_null, not_
+
+db.select("user").where(
+    eq(U.active, True),
+    or_(in_array(U.role, ["admin", "mod"]), is_null(U.role)),
+    not_(eq(U.age, 0)),
+).all()
+```
+
+Aggregations — `count, sum_, avg, min_, max_` with `.group_by(...)` and
+`.having(agg, op, value)`; terminal `.aggregate({...})` returns one row per group:
+
+```python
+from agnes import count, sum_, avg
+
+db.select("order") \
+  .where(gt(O.total, 0)) \
+  .group_by(O.user_id) \
+  .having(sum_(O.total), ">", 100) \
+  .aggregate({"spent": sum_(O.total), "orders": count(), "avg_total": avg(O.total)})
+```
+
+`count()` with no argument is `COUNT(*)`. (`sum_`/`min_`/`max_` are underscored to
+avoid shadowing Python builtins.)
+
+`query()` (for `include`) has `.where`, `.order_by`, `.limit`,
+`.select(*cols)`, `.type("left"|"inner")`. SQL joins:
+`.left_join/.inner_join/.right_join/.full_join("tbl", on(a, b))`.
