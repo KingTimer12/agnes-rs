@@ -364,6 +364,15 @@ bun run typecheck   # tsc --noEmit
 bun test            # bun test
 ```
 
+## Prior art
+
+The query API is **inspired by** [Drizzle](https://orm.drizzle.team) (fluent
+builder, `eq`/`gt`-style condition helpers) and [Prisma](https://www.prisma.io)
+(typed relations, interactive transactions). The *feel* is deliberately
+familiar, but the entire implementation is original work written from scratch —
+no source code from those projects is used or derived. "Drizzle" and "Prisma"
+are trademarks of their respective owners.
+
 ## License
 
 MIT OR Apache-2.0

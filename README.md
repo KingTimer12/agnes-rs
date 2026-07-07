@@ -219,6 +219,16 @@ await db.insertInto("post").values({ userId: 1, content: "Hello!" });
 
 Early (`0.0.11`). APIs may change. Contributions welcome.
 
+## Prior art
+
+Agnes' query API is **inspired by** the ergonomics of modern TypeScript ORMs —
+notably [Drizzle](https://orm.drizzle.team) (fluent builder, `eq`/`gt`-style
+condition helpers) and [Prisma](https://www.prisma.io) (typed relations,
+interactive transactions). The *feel* is deliberately familiar, but the entire
+implementation — schema DSL, query builder, Rust core, cache, and adapters — is
+original work written from scratch. No source code from those projects is used
+or derived. "Drizzle" and "Prisma" are trademarks of their respective owners.
+
 ## License
 
 MIT OR Apache-2.0
