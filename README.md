@@ -118,6 +118,40 @@ The same Rust core is exposed to both: [`agnes-library`](./agnes-library) (npm)
 and [`agnes`](./agnes-py) (PyPI, via PyO3) share the schema DSL, query builder,
 relations, cache and transactions.
 
+### 8. An expressive query builder
+
+Beyond `eq`/`gt`, the builder covers the operators you actually reach for and
+lets you nest them arbitrarily:
+
+- **Conditions.** `eq` · `neq` · `gt` · `gte` · `lt` · `lte` · `like` · `ilike` ·
+  `inArray` · `notInArray` · `isNull` · `isNotNull` · `between`, combined and
+  nested with `and(...)` / `or(...)` / `not(...)`. Empty `inArray`/`notInArray`
+  render as always-false / always-true — never an invalid `IN ()`.
+- **Aggregations.** `count` · `sum` · `avg` · `min` · `max` with `.groupBy(...)`
+  and `.having(agg, op, value)`; terminal `.aggregate({ alias: fn })` returns one
+  typed row per group.
+- **Bulk insert & upsert.** Pass an array to `.values([...])` — one statement,
+  auto-chunked to each driver's bound-parameter limit. `.onConflict(...cols)`
+  with `.merge()` / `.ignore()` maps to `ON CONFLICT` (pg/sqlite),
+  `ON DUPLICATE KEY` / `INSERT IGNORE` (mysql).
+- **RETURNING.** `.returning(...cols)` on insert/update/delete returns the
+  affected rows instead of a count (Postgres/SQLite; throws on MySQL).
+
+### 9. Streaming large result sets
+
+`.stream(batchSize?)` iterates a huge result set in constant memory instead of
+buffering it — the Rust core fetches behind a bounded channel (a server-side
+cursor on Postgres), so nothing materializes all rows at once.
+
+```ts
+for await (const user of db.select("user").where(gt(u.age, 18)).stream(1000)) {
+  process(user); // memory stays flat over millions of rows
+}
+```
+
+Available in both TypeScript and Python. Not usable inside a transaction, and
+incompatible with `.include()` (relations need the full set).
+
 ---
 
 ## Quick start
@@ -183,7 +217,7 @@ await db.insertInto("post").values({ userId: 1, content: "Hello!" });
 
 ## Status
 
-Early (`0.0.9`). APIs may change. Contributions welcome.
+Early (`0.0.11`). APIs may change. Contributions welcome.
 
 ## License
 
