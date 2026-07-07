@@ -15,7 +15,7 @@ import {
   type TableEntry,
 } from "./schema";
 import type { Dialect } from "./query/builder";
-import { SelectBuilder, InsertBuilder, UpdateBuilder, DeleteBuilder } from "./query/builder";
+import { InsertBuilder, UpdateBuilder, DeleteBuilder, SelectBuilder } from "./query/builders";
 import { generateSchemaDdl } from "./query/ddl";
 
 /** Query surface shared by the client and a transaction — builds against any runner. */

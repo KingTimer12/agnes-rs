@@ -15,3 +15,7 @@ pub enum AgnesError {
 }
 
 pub type Result<T> = std::result::Result<T, AgnesError>;
+
+pub fn adapter_err<E: std::fmt::Display>(e: E) -> AgnesError {
+    AgnesError::Adapter(e.to_string())
+}

@@ -5,9 +5,11 @@ import {
   InsertBuilder,
   UpdateBuilder,
   DeleteBuilder,
+} from "../src/query/builders";
+import {
   eq, gt, ilike, inArray, notInArray, isNull, isNotNull, between, and, or, not,
-  count, sum, avg,
-} from "../src/query/builder";
+} from "../src/query/conditions";
+import { count, sum, avg } from "../src/query/aggregate";
 import type { QueryRunner } from "../src/bridge";
 
 const orderTbl = table(

@@ -1,7 +1,8 @@
 use agnes_core::adapter::{DatabaseAdapter, DatabaseBind, DbTransaction, Dialect, PoolConfig};
-use agnes_core::error::{AgnesError, Result};
+use agnes_core::error::{AgnesError, Result, adapter_err};
 use agnes_core::stream::RowStream;
 use agnes_core::types::{Rows, Value};
+use agnes_core::utils::apply_pool_opts;
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use sqlx::MySql;
@@ -9,27 +10,6 @@ use sqlx::mysql::{MySqlPool, MySqlPoolOptions};
 use sqlx::pool::PoolConnection;
 
 use crate::row_ref::MySqlRowRef;
-
-/// Apply the shared pool tuning to a MySQL pool builder.
-fn apply_pool_opts(mut o: MySqlPoolOptions, cfg: &PoolConfig) -> MySqlPoolOptions {
-    o = o
-        .max_connections(cfg.max_connections.max(1))
-        .min_connections(cfg.min_connections);
-    if let Some(d) = cfg.acquire_timeout {
-        o = o.acquire_timeout(d);
-    }
-    if let Some(d) = cfg.idle_timeout {
-        o = o.idle_timeout(d);
-    }
-    if let Some(d) = cfg.max_lifetime {
-        o = o.max_lifetime(d);
-    }
-    o
-}
-
-fn adapter_err<E: std::fmt::Display>(e: E) -> AgnesError {
-    AgnesError::Adapter(e.to_string())
-}
 
 /// Transaction bound to one pooled MySQL connection.
 pub struct MySqlTx {

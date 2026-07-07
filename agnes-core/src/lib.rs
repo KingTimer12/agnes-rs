@@ -6,6 +6,7 @@ pub mod key;
 pub mod parser;
 pub mod stream;
 pub mod types;
+pub mod utils;
 
 pub use adapter::{DatabaseAdapter, DbTransaction, Dialect, PoolConfig};
 pub use cache::CacheBackend;

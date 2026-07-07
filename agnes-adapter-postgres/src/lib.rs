@@ -1,7 +1,8 @@
 use agnes_core::adapter::{DatabaseAdapter, DatabaseBind, DbTransaction, Dialect, PoolConfig};
-use agnes_core::error::{AgnesError, Result};
+use agnes_core::error::{AgnesError, Result, adapter_err};
 use agnes_core::stream::RowStream;
 use agnes_core::types::{Rows, Value};
+use agnes_core::utils::apply_pool_opts;
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use sqlx::Postgres;
@@ -9,27 +10,6 @@ use sqlx::pool::PoolConnection;
 use sqlx::postgres::{PgPool, PgPoolOptions};
 
 use crate::row_ref::PostgresRowRef;
-
-/// Apply the shared pool tuning to a Postgres pool builder.
-fn apply_pool_opts(mut o: PgPoolOptions, cfg: &PoolConfig) -> PgPoolOptions {
-    o = o
-        .max_connections(cfg.max_connections.max(1))
-        .min_connections(cfg.min_connections);
-    if let Some(d) = cfg.acquire_timeout {
-        o = o.acquire_timeout(d);
-    }
-    if let Some(d) = cfg.idle_timeout {
-        o = o.idle_timeout(d);
-    }
-    if let Some(d) = cfg.max_lifetime {
-        o = o.max_lifetime(d);
-    }
-    o
-}
-
-fn adapter_err<E: std::fmt::Display>(e: E) -> AgnesError {
-    AgnesError::Adapter(e.to_string())
-}
 
 /// Transaction bound to one pooled Postgres connection.
 pub struct PostgresTx {
