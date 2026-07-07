@@ -84,6 +84,15 @@ rows = (db.select("user")
 with_posts = db.select("user").include({"posts": query().limit(3)}).all()
 
 db.insert_into("user").values({"name": "Ana", "age": 30})
+
+# bulk insert — one statement, auto-chunked to the param limit; missing keys → NULL
+db.insert_into("user").values([{"name": "Ana"}, {"name": "Bia", "age": 20}])
+
+# upsert — on_conflict(*cols) with merge()/ignore()
+db.insert_into("user").on_conflict(U.id).merge().values({"id": 1, "name": "Ana"})
+db.insert_into("user").on_conflict(U.email).merge(U.name).values({"email": "a@x", "name": "Ana"})
+db.insert_into("user").on_conflict(U.id).ignore().values({"id": 1, "name": "Ana"})
+
 db.update("user", {"active": False}).where(eq(U.id, 1)).run()
 db.delete_from("post").where(eq(db._schema["post"].c.id, 2)).run()
 

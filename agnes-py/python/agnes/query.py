@@ -477,23 +477,109 @@ def _phys(definition, key: str) -> str:
     return field.name if isinstance(field, Column) else key
 
 
+def _max_vars(dialect: Dialect) -> int:
+    # Bound-parameter ceilings; stay conservative (SQLite older builds cap at 999).
+    return 900 if dialect == "sqlite" else 60000
+
+
 class InsertBuilder:
     def __init__(self, db, table_name: str, definition, dialect: Dialect) -> None:
         self._db = db
         self._table_name = table_name
         self._def = definition
         self._dialect = dialect
+        self._conflict_cols: Optional[List[str]] = None
+        self._mode = "none"  # "none" | "ignore" | "merge"
+        self._merge_cols: Optional[List[str]] = None
 
-    def values(self, row: Dict[str, Any]) -> int:
+    def on_conflict(self, *cols: Column) -> "InsertBuilder":
+        """Conflict target columns (Postgres/SQLite ON CONFLICT (...)). MySQL
+        ignores the target and uses its unique keys. Pair with merge()/ignore()."""
+        self._conflict_cols = [c.name for c in cols]
+        return self
+
+    def ignore(self) -> "InsertBuilder":
+        """On conflict, skip the row (DO NOTHING / INSERT IGNORE)."""
+        self._mode = "ignore"
+        return self
+
+    def merge(self, *cols: Column) -> "InsertBuilder":
+        """On conflict, update the row (upsert). No args updates every inserted
+        column except the conflict target; otherwise only the given columns."""
+        self._mode = "merge"
+        if cols:
+            self._merge_cols = [c.name for c in cols]
+        return self
+
+    def _conflict_clause(self, inserted_cols: List[str]) -> str:
+        if self._mode == "none":
+            return ""
         d = self._dialect
-        cols = [_phys(self._def, k) for k in row]
-        params = list(row.values())
-        ph = ", ".join(placeholder(d, i + 1) for i in range(len(params)))
-        sql = (
-            f"INSERT INTO {ident(d, self._table_name)} "
-            f"({', '.join(ident(d, c) for c in cols)}) VALUES ({ph})"
+        conflict_set = set(self._conflict_cols or [])
+        update_cols = self._merge_cols or [c for c in inserted_cols if c not in conflict_set]
+
+        if d == "mysql":
+            if self._mode == "ignore":
+                return ""  # handled by the INSERT IGNORE prefix
+            sets = ", ".join(f"{ident(d, c)} = VALUES({ident(d, c)})" for c in update_cols)
+            return f" ON DUPLICATE KEY UPDATE {sets}"
+
+        target = (
+            f" ({', '.join(ident(d, c) for c in self._conflict_cols)})"
+            if self._conflict_cols
+            else ""
         )
-        return self._db.mutate(sql, params)
+        if self._mode == "ignore":
+            return f" ON CONFLICT{target} DO NOTHING"
+        sets = ", ".join(f"{ident(d, c)} = EXCLUDED.{ident(d, c)}" for c in update_cols)
+        return f" ON CONFLICT{target} DO UPDATE SET {sets}"
+
+    def _build_statement(self, chunk: List[Dict[str, Any]], col_keys: List[str]):
+        d = self._dialect
+        phys_cols = [_phys(self._def, k) for k in col_keys]
+        params: List[Any] = []
+        tuples = []
+        for row in chunk:
+            phs = []
+            for k in col_keys:
+                params.append(row.get(k))
+                phs.append(placeholder(d, len(params)))
+            tuples.append(f"({', '.join(phs)})")
+        keyword = "INSERT IGNORE INTO" if d == "mysql" and self._mode == "ignore" else "INSERT INTO"
+        sql = (
+            f"{keyword} {ident(d, self._table_name)} "
+            f"({', '.join(ident(d, c) for c in phys_cols)}) VALUES {', '.join(tuples)}"
+        )
+        sql += self._conflict_clause(phys_cols)
+        return sql, params
+
+    def values(self, row_or_rows) -> int:
+        """Insert one row (dict) or many (list of dicts). Multi-row inserts go in
+        one statement, chunked to respect the driver's parameter limit. Chunks
+        are separate statements — wrap in db.transaction for all-or-nothing.
+        Returns total affected rows."""
+        rows = row_or_rows if isinstance(row_or_rows, list) else [row_or_rows]
+        if not rows:
+            return 0
+
+        # Union of keys across rows, first-seen order. Missing keys insert NULL.
+        col_keys: List[str] = []
+        seen = set()
+        for row in rows:
+            for k in row:
+                if k not in seen:
+                    seen.add(k)
+                    col_keys.append(k)
+        if not col_keys:
+            return 0
+
+        rows_per_chunk = max(1, _max_vars(self._dialect) // len(col_keys))
+        affected = 0
+        for i in range(0, len(rows), rows_per_chunk):
+            chunk = rows[i : i + rows_per_chunk]
+            sql, params = self._build_statement(chunk, col_keys)
+            affected += self._db.mutate(sql, params)
+        return affected
 
 
 class UpdateBuilder:

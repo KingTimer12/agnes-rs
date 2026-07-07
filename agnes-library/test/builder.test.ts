@@ -2,6 +2,7 @@ import { test, expect } from "bun:test";
 import { table, int, text, float, columnsOf } from "../src/schema";
 import {
   SelectBuilder,
+  InsertBuilder,
   eq, gt, ilike, inArray, notInArray, isNull, isNotNull, between, and, or, not,
   count, sum, avg,
 } from "../src/query/builder";
@@ -113,4 +114,95 @@ test("aggregate with groupBy + having", async () => {
       `FROM "orders" WHERE "total" > $1 GROUP BY "user_id" HAVING SUM("total") > $2`,
   );
   expect(call.params).toEqual([0, 100]);
+});
+
+// ─── InsertBuilder ────────────────────────────────────────────────────────────
+
+function mutCapture() {
+  const calls: { sql: string; params: unknown[] }[] = [];
+  const runner: QueryRunner = {
+    async query() {
+      return [];
+    },
+    async mutate(sql, params) {
+      calls.push({ sql, params: params ?? [] });
+      return 1;
+    },
+  };
+  return { runner, calls };
+}
+
+test("single-row insert (backward compatible)", async () => {
+  const { runner, calls } = mutCapture();
+  const n = await new InsertBuilder(runner, "orders", orderTbl.def, "postgres").values({
+    userId: 1,
+    total: 9,
+  });
+  expect(n).toBe(1);
+  expect(calls[0]!.sql).toBe(
+    `INSERT INTO "orders" ("user_id", "total") VALUES ($1, $2)`,
+  );
+  expect(calls[0]!.params).toEqual([1, 9]);
+});
+
+test("multi-row insert, union of keys fills missing with NULL", async () => {
+  const { runner, calls } = mutCapture();
+  await new InsertBuilder(runner, "orders", orderTbl.def, "postgres").values([
+    { userId: 1, total: 9 },
+    { userId: 2, status: "new" },
+  ]);
+  expect(calls).toHaveLength(1);
+  expect(calls[0]!.sql).toBe(
+    `INSERT INTO "orders" ("user_id", "total", "status") VALUES ($1, $2, $3), ($4, $5, $6)`,
+  );
+  expect(calls[0]!.params).toEqual([1, 9, null, 2, null, "new"]);
+});
+
+test("upsert merge (postgres) updates non-conflict cols by default", async () => {
+  const { runner, calls } = mutCapture();
+  await new InsertBuilder(runner, "orders", orderTbl.def, "postgres")
+    .onConflict(o.id)
+    .merge()
+    .values({ id: 5, total: 3, status: "paid" });
+  expect(calls[0]!.sql).toBe(
+    `INSERT INTO "orders" ("id", "total", "status") VALUES ($1, $2, $3) ` +
+      `ON CONFLICT ("id") DO UPDATE SET "total" = EXCLUDED."total", "status" = EXCLUDED."status"`,
+  );
+});
+
+test("upsert ignore (sqlite) and mysql prefix", async () => {
+  const pg = mutCapture();
+  await new InsertBuilder(pg.runner, "orders", orderTbl.def, "sqlite")
+    .onConflict(o.id)
+    .ignore()
+    .values({ id: 5, total: 3 });
+  expect(pg.calls[0]!.sql).toBe(
+    `INSERT INTO "orders" ("id", "total") VALUES (?, ?) ON CONFLICT ("id") DO NOTHING`,
+  );
+
+  const my = mutCapture();
+  await new InsertBuilder(my.runner, "orders", orderTbl.def, "mysql")
+    .ignore()
+    .values({ id: 5, total: 3 });
+  expect(my.calls[0]!.sql).toBe(
+    "INSERT IGNORE INTO `orders` (`id`, `total`) VALUES (?, ?)",
+  );
+
+  const myMerge = mutCapture();
+  await new InsertBuilder(myMerge.runner, "orders", orderTbl.def, "mysql")
+    .onConflict(o.id)
+    .merge(o.total)
+    .values({ id: 5, total: 3 });
+  expect(myMerge.calls[0]!.sql).toBe(
+    "INSERT INTO `orders` (`id`, `total`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `total` = VALUES(`total`)",
+  );
+});
+
+test("bulk insert chunks by param limit (sqlite)", async () => {
+  const { runner, calls } = mutCapture();
+  // sqlite cap 900 vars / 1 col = 900 rows per chunk.
+  const rows = Array.from({ length: 950 }, (_, i) => ({ userId: i }));
+  const n = await new InsertBuilder(runner, "orders", orderTbl.def, "sqlite").values(rows);
+  expect(calls).toHaveLength(2);
+  expect(n).toBe(2); // one affected per mutate() stub call
 });

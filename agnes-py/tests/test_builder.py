@@ -14,6 +14,7 @@ sys.modules.setdefault("agnes._native", _stub)
 
 # Import from submodules directly so the test needs no compiled `_native`.
 from agnes.query import (  # noqa: E402
+    InsertBuilder,
     SelectBuilder,
     avg,
     between,
@@ -35,13 +36,15 @@ from agnes.schema import table, int_, text, float_  # noqa: E402
 class FakeRunner:
     def __init__(self):
         self.calls = []
+        self.mutations = []
 
     def query(self, sql, params=None, opts=None):
         self.calls.append((sql, params or []))
         return []
 
     def mutate(self, sql, params=None):
-        return 0
+        self.mutations.append((sql, params or []))
+        return 1
 
 
 order = table(
@@ -115,3 +118,62 @@ def test_aggregate():
         'FROM "orders" WHERE "total" > $1 GROUP BY "user_id" HAVING SUM("total") > $2'
     )
     assert params == [0, 100]
+
+
+def ib(dialect="postgres"):
+    r = FakeRunner()
+    return r, InsertBuilder(r, "orders", C, dialect)
+
+
+def test_insert_single():
+    r, b = ib()
+    n = b.values({"userId": 1, "total": 9})
+    assert n == 1
+    assert r.mutations[0][0] == 'INSERT INTO "orders" ("user_id", "total") VALUES ($1, $2)'
+    assert r.mutations[0][1] == [1, 9]
+
+
+def test_insert_multi_union_null():
+    r, b = ib()
+    b.values([{"userId": 1, "total": 9}, {"userId": 2, "status": "new"}])
+    assert len(r.mutations) == 1
+    sql, params = r.mutations[0]
+    assert sql == (
+        'INSERT INTO "orders" ("user_id", "total", "status") VALUES ($1, $2, $3), ($4, $5, $6)'
+    )
+    assert params == [1, 9, None, 2, None, "new"]
+
+
+def test_upsert_merge_pg():
+    r, b = ib()
+    b.on_conflict(C["id"]).merge().values({"id": 5, "total": 3, "status": "paid"})
+    assert r.mutations[0][0] == (
+        'INSERT INTO "orders" ("id", "total", "status") VALUES ($1, $2, $3) '
+        'ON CONFLICT ("id") DO UPDATE SET "total" = EXCLUDED."total", "status" = EXCLUDED."status"'
+    )
+
+
+def test_upsert_ignore_and_mysql():
+    r, b = ib("sqlite")
+    b.on_conflict(C["id"]).ignore().values({"id": 5, "total": 3})
+    assert r.mutations[0][0] == (
+        'INSERT INTO "orders" ("id", "total") VALUES (?, ?) ON CONFLICT ("id") DO NOTHING'
+    )
+
+    r2, b2 = ib("mysql")
+    b2.ignore().values({"id": 5, "total": 3})
+    assert r2.mutations[0][0] == "INSERT IGNORE INTO `orders` (`id`, `total`) VALUES (?, ?)"
+
+    r3, b3 = ib("mysql")
+    b3.on_conflict(C["id"]).merge(C["total"]).values({"id": 5, "total": 3})
+    assert r3.mutations[0][0] == (
+        "INSERT INTO `orders` (`id`, `total`) VALUES (?, ?) "
+        "ON DUPLICATE KEY UPDATE `total` = VALUES(`total`)"
+    )
+
+
+def test_insert_chunks():
+    r, b = ib("sqlite")
+    n = b.values([{"userId": i} for i in range(950)])
+    assert len(r.mutations) == 2  # 900 vars / 1 col = 900 rows per chunk
+    assert n == 2

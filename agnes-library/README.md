@@ -202,6 +202,33 @@ await db.update("user", { age: 31 }).where(eq(u.id, 5)).run();
 await db.deleteFrom("post").where(eq(p.id, 9)).run();
 ```
 
+**Bulk insert** — pass an array. It goes in one statement, auto-chunked to the
+driver's bound-parameter limit (chunks are separate statements — wrap in
+`db.transaction` for all-or-nothing). Missing keys insert as `NULL`.
+
+```ts
+await db.insertInto("post").values([
+  { userId: 1, content: "a" },
+  { userId: 2, content: "b" },
+]);
+```
+
+**Upsert** — `.onConflict(...cols)` with `.merge()` or `.ignore()`:
+
+```ts
+// update on conflict (Postgres/SQLite ON CONFLICT, MySQL ON DUPLICATE KEY)
+await db.insertInto("user").onConflict(u.id).merge().values({ id: 1, name: "Ana" });
+
+// only update specific columns
+await db.insertInto("user").onConflict(u.email).merge(u.name).values({ email: "a@x", name: "Ana" });
+
+// skip on conflict (DO NOTHING / INSERT IGNORE)
+await db.insertInto("user").onConflict(u.id).ignore().values({ id: 1, name: "Ana" });
+```
+
+`.merge()` with no args updates every inserted column except the conflict
+target. MySQL ignores the `onConflict` target and matches on its unique keys.
+
 ### Raw SQL
 
 ```ts
