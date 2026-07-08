@@ -68,9 +68,15 @@ db = AgnesClient.create(
         "max_lifetime_secs": 1800,       # recycle after this lifetime
         "strip_timezone": True,          # optional: timestamps as naive ISO (no offset)
         "cache": {"enabled": True, "wal_path": ".agnes/cache.wal"},
+        # read/write splitting (master/slave), all optional:
+        "replicas": ["postgres://replica-1/db", "postgres://replica-2/db"],
+        "master_read_penalty": 100,      # bias reads toward replicas (default 100)
+        "replica_cooldown_secs": 5,      # skip a replica this long after it errors
     },
     schema,
 )
+# With `replicas`, `url` is the write master: writes/transactions go there,
+# reads are load-balanced to the least-busy node (master included, penalized).
 
 U = db._schema["user"].c            # column accessor: U.age, U["age"]
 

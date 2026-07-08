@@ -162,6 +162,35 @@ for await (const user of db.select("user").where(gt(u.age, 18)).stream(1000)) {
 Available in both TypeScript and Python. Not usable inside a transaction, and
 incompatible with `.include()` (relations need the full set).
 
+### 10. Read/write splitting (master + replicas)
+
+Point Agnes at one write **master** and any number of read **replicas** and it
+routes automatically — no code changes, just config:
+
+```ts
+const db = await AgnesClient.create({
+  driver: "postgres",
+  url: "postgres://master/app",          // writes + transactions
+  replicas: [                             // reads, load-balanced
+    "postgres://replica-1/app",
+    "postgres://replica-2/app",
+  ],
+}, schema);
+```
+
+- **Writes and transactions** always go to the master.
+- **Reads** go to the least-loaded node, measured by live in-flight request
+  count (no health-check round trip). The master is a read candidate too, but
+  carries a configurable load penalty (`masterReadPenalty`, default 100) so
+  replicas win while it's busy — and its own write traffic raises its in-flight
+  count, backing reads off it further under write load.
+- **Failover:** a read that errors puts that node in a short cooldown
+  (`replicaCooldownSecs`, default 5) and retries the next-best node; a fully
+  cooled-down set is still tried rather than failing fast.
+
+Implemented in the Rust core as a `DatabaseAdapter` that composes the per-node
+adapters, so the executor, cache and both SDKs get it transparently.
+
 ---
 
 ## Quick start

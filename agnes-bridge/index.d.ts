@@ -57,6 +57,19 @@ export interface DatabaseConfig {
    * Avoids the JS `Date` tz-shift footgun. Postgres only; defaults to false.
    */
   stripTimezone?: boolean
+  /**
+   * Read replicas (master/slave mode). When set, `url` is the write master and
+   * these are read-only replicas: writes and transactions go to the master;
+   * reads are load-balanced across the least-busy node.
+   */
+  replicas?: Array<string>
+  /**
+   * Extra load penalty on the master when picking a read node (default 100).
+   * Higher = replicas preferred more strongly. Only used with `replicas`.
+   */
+  masterReadPenalty?: number
+  /** Seconds a replica is skipped for reads after it errors (default 5). */
+  replicaCooldownSecs?: number
 }
 
 export interface QueryOpts {

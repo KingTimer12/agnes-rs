@@ -356,11 +356,32 @@ interface DatabaseConfig {
   idleTimeoutSecs?: number;   // close a connection after this idle time
   maxLifetimeSecs?: number;   // recycle a connection after this lifetime
   cache?: CacheConfig;
+  // Read/write splitting (master/slave) — optional:
+  replicas?: string[];        // read-only replicas; `url` becomes the write master
+  masterReadPenalty?: number; // load penalty on master when picking a reader (default 100)
+  replicaCooldownSecs?: number; // skip a replica this long after it errors (default 5)
 }
 ```
 
 Every driver is pooled by default (via `sqlx`). Tune it with the fields above;
 omit them for sensible defaults.
+
+### Read/write splitting
+
+Set `replicas` and `url` becomes the write **master**; the listed nodes are
+read **replicas**. Writes and transactions go to the master; reads are routed to
+the least-loaded node (by live in-flight count). The master also serves reads,
+but with a `masterReadPenalty` bias so replicas win while it's under load. A read
+that errors cools its node down (`replicaCooldownSecs`) and fails over to the
+next-best node.
+
+```ts
+const db = await AgnesClient.create({
+  driver: "postgres",
+  url: "postgres://master/app",
+  replicas: ["postgres://replica-1/app", "postgres://replica-2/app"],
+}, schema);
+```
 
 ---
 

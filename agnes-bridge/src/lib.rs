@@ -11,6 +11,7 @@ use agnes_cache::{KvConfig, KvMotor};
 use agnes_core::adapter::{DatabaseAdapter, PoolConfig};
 use agnes_core::cache::CacheBackend;
 use agnes_core::executor::Executor;
+use agnes_core::replicated::{ReplicatedAdapter, ReplicationOptions};
 use agnes_core::types::QueryOptions;
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
@@ -35,6 +36,15 @@ pub struct DatabaseConfig {
   /// Return temporal values without a timezone offset (naive wall-clock ISO).
   /// Avoids the JS `Date` tz-shift footgun. Postgres only; defaults to false.
   pub strip_timezone: Option<bool>,
+  /// Read replicas (master/slave mode). When set, `url` is the write master and
+  /// these are read-only replicas: writes and transactions go to the master;
+  /// reads are load-balanced across the least-busy node.
+  pub replicas: Option<Vec<String>>,
+  /// Extra load penalty on the master when picking a read node (default 100).
+  /// Higher = replicas preferred more strongly. Only used with `replicas`.
+  pub master_read_penalty: Option<u32>,
+  /// Seconds a replica is skipped for reads after it errors (default 5).
+  pub replica_cooldown_secs: Option<u32>,
 }
 
 #[napi(object)]
@@ -70,25 +80,24 @@ impl Database {
       max_lifetime: secs(config.max_lifetime_secs),
     };
 
-    let adapter: Arc<dyn DatabaseAdapter> = match config.driver.to_ascii_lowercase().as_str() {
-      "postgres" | "postgresql" | "pg" => Arc::new(
-        PostgresAdapter::connect(&config.url, &pool, strip_tz)
-          .await
-          .map_err(to_napi)?,
-      ),
-      "mysql" | "mariadb" => Arc::new(
-        MySqlAdapter::connect(&config.url, &pool, strip_tz)
-          .await
-          .map_err(to_napi)?,
-      ),
-      "sqlite" => Arc::new(
-        SqliteAdapter::connect(&config.url, &pool, strip_tz)
-          .await
-          .map_err(to_napi)?,
-      ),
-      other => {
-        return Err(Error::from_reason(format!("unknown driver: {other}")));
+    let driver = config.driver.to_ascii_lowercase();
+    let master = connect_adapter(&driver, &config.url, &pool, strip_tz).await?;
+
+    let adapter: Arc<dyn DatabaseAdapter> = match &config.replicas {
+      Some(urls) if !urls.is_empty() => {
+        let mut replicas = Vec::with_capacity(urls.len());
+        for url in urls {
+          replicas.push(connect_adapter(&driver, url, &pool, strip_tz).await?);
+        }
+        let opts = ReplicationOptions {
+          master_read_penalty: config.master_read_penalty.unwrap_or(100) as i64,
+          cooldown: std::time::Duration::from_secs(
+            config.replica_cooldown_secs.unwrap_or(5) as u64,
+          ),
+        };
+        Arc::new(ReplicatedAdapter::new(master, replicas, opts))
       }
+      _ => master,
     };
 
     let cache: Option<Arc<dyn CacheBackend>> = match config.cache {
@@ -249,6 +258,26 @@ fn to_query_options(opts: Option<QueryOpts>) -> QueryOptions {
       bypass_cache: o.bypass_cache.unwrap_or(false),
     },
   }
+}
+
+/// Connect a single node's adapter for the given driver.
+async fn connect_adapter(
+  driver: &str,
+  url: &str,
+  pool: &PoolConfig,
+  strip_tz: bool,
+) -> Result<Arc<dyn DatabaseAdapter>> {
+  let adapter: Arc<dyn DatabaseAdapter> = match driver {
+    "postgres" | "postgresql" | "pg" => {
+      Arc::new(PostgresAdapter::connect(url, pool, strip_tz).await.map_err(to_napi)?)
+    }
+    "mysql" | "mariadb" => {
+      Arc::new(MySqlAdapter::connect(url, pool, strip_tz).await.map_err(to_napi)?)
+    }
+    "sqlite" => Arc::new(SqliteAdapter::connect(url, pool, strip_tz).await.map_err(to_napi)?),
+    other => return Err(Error::from_reason(format!("unknown driver: {other}"))),
+  };
+  Ok(adapter)
 }
 
 fn to_napi<E: std::fmt::Display>(e: E) -> Error {

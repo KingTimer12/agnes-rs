@@ -30,6 +30,21 @@ export interface DatabaseConfig {
    * defaults to false. SQLite/MySQL values are already naive.
    */
   stripTimezone?: boolean;
+  /**
+   * Read replicas (master/slave mode). When set, `url` is the write **master**
+   * and these are read-only **replicas**: writes and transactions go to the
+   * master, while reads are load-balanced to the least-busy node. One master,
+   * any number of replicas. Omit for a single-node setup.
+   */
+  replicas?: string[];
+  /**
+   * Extra load penalty applied to the master when choosing a read node
+   * (default 100). Higher biases reads toward replicas; the master still serves
+   * reads when it's the least-loaded node. Only used with `replicas`.
+   */
+  masterReadPenalty?: number;
+  /** Seconds a replica is skipped for reads after it errors (default 5). */
+  replicaCooldownSecs?: number;
 }
 
 export interface QueryOpts {

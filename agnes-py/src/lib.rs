@@ -5,6 +5,7 @@ use agnes_adapter_postgres::PostgresAdapter;
 use agnes_adapter_sqlite::SqliteAdapter;
 use agnes_cache::{KvConfig, KvMotor};
 use agnes_core::adapter::{DatabaseAdapter, PoolConfig};
+use agnes_core::replicated::{ReplicatedAdapter, ReplicationOptions};
 use agnes_core::cache::CacheBackend;
 use agnes_core::executor::{Executor, Transaction as CoreTx};
 use agnes_core::types::{QueryOptions, Value};
@@ -94,6 +95,28 @@ fn opt_bool(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<bool>> {
     }
 }
 
+/// Connect a single node's adapter for the given driver.
+async fn connect_adapter(
+    driver: &str,
+    url: &str,
+    pool: &PoolConfig,
+    strip_tz: bool,
+) -> Result<Arc<dyn DatabaseAdapter>, agnes_core::error::AgnesError> {
+    let a: Arc<dyn DatabaseAdapter> = match driver {
+        "postgres" | "postgresql" | "pg" => {
+            Arc::new(PostgresAdapter::connect(url, pool, strip_tz).await?)
+        }
+        "mysql" | "mariadb" => Arc::new(MySqlAdapter::connect(url, pool, strip_tz).await?),
+        "sqlite" => Arc::new(SqliteAdapter::connect(url, pool, strip_tz).await?),
+        other => {
+            return Err(agnes_core::error::AgnesError::Adapter(format!(
+                "unknown driver: {other}"
+            )));
+        }
+    };
+    Ok(a)
+}
+
 /// Native database handle. Heavy lifting (pool, parser, cache) runs in Rust.
 #[pyclass]
 struct Database {
@@ -146,6 +169,15 @@ impl Database {
             _ => None,
         };
 
+        // Read-replica config (master/slave mode) — extract while the GIL is held.
+        let replicas: Vec<String> = match config.get_item("replicas")? {
+            Some(v) if !v.is_none() => v.extract::<Vec<String>>()?,
+            _ => Vec::new(),
+        };
+        let master_read_penalty = opt_u32(config, "master_read_penalty")?.unwrap_or(100) as i64;
+        let replica_cooldown =
+            std::time::Duration::from_secs(opt_u32(config, "replica_cooldown_secs")?.unwrap_or(5) as u64);
+
         let rt = Arc::new(
             tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
@@ -153,24 +185,23 @@ impl Database {
                 .map_err(err)?,
         );
 
+        let driver = driver.to_ascii_lowercase();
         let adapter = py
             .detach(|| {
                 rt.block_on(async {
-                    let a: Arc<dyn DatabaseAdapter> = match driver.to_ascii_lowercase().as_str() {
-                        "postgres" | "postgresql" | "pg" => {
-                            Arc::new(PostgresAdapter::connect(&url, &pool, strip_tz).await?)
-                        }
-                        "mysql" | "mariadb" => {
-                            Arc::new(MySqlAdapter::connect(&url, &pool, strip_tz).await?)
-                        }
-                        "sqlite" => Arc::new(SqliteAdapter::connect(&url, &pool, strip_tz).await?),
-                        other => {
-                            return Err(agnes_core::error::AgnesError::Adapter(format!(
-                                "unknown driver: {other}"
-                            )));
-                        }
+                    let master = connect_adapter(&driver, &url, &pool, strip_tz).await?;
+                    if replicas.is_empty() {
+                        return Ok::<Arc<dyn DatabaseAdapter>, agnes_core::error::AgnesError>(master);
+                    }
+                    let mut reps = Vec::with_capacity(replicas.len());
+                    for r in &replicas {
+                        reps.push(connect_adapter(&driver, r, &pool, strip_tz).await?);
+                    }
+                    let opts = ReplicationOptions {
+                        master_read_penalty,
+                        cooldown: replica_cooldown,
                     };
-                    Ok::<Arc<dyn DatabaseAdapter>, agnes_core::error::AgnesError>(a)
+                    Ok(Arc::new(ReplicatedAdapter::new(master, reps, opts)) as Arc<dyn DatabaseAdapter>)
                 })
             })
             .map_err(err)?;
