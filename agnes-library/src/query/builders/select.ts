@@ -314,6 +314,34 @@ export class SelectBuilder<
   }
 
   /**
+   * Count matching rows — `SELECT COUNT(*)` honoring `.where()` and joins
+   * (ignores projection, limit/offset and ordering).
+   *
+   * ```ts
+   * const n = await db.select("user").where(gt(u.age, 18)).count();
+   * ```
+   */
+  async count(): Promise<number> {
+    const params: unknown[] = [];
+    let sql = `SELECT COUNT(*) AS ${ident(this.dialect, "n")} FROM ${ident(this.dialect, this.tableName)}`;
+    sql += this.buildJoins();
+    sql += buildWhere(this.dialect, this.conds, params);
+    const rows = (await this.db.query(sql, params, this.opts)) as Record<string, unknown>[];
+    return Number(rows[0]?.["n"] ?? 0);
+  }
+
+  /** Whether any row matches — `SELECT 1 … LIMIT 1`, honoring `.where()`/joins. */
+  async exists(): Promise<boolean> {
+    const params: unknown[] = [];
+    let sql = `SELECT 1 FROM ${ident(this.dialect, this.tableName)}`;
+    sql += this.buildJoins();
+    sql += buildWhere(this.dialect, this.conds, params);
+    sql += " LIMIT 1";
+    const rows = (await this.db.query(sql, params, this.opts)) as unknown[];
+    return rows.length > 0;
+  }
+
+  /**
    * Stream the result row-by-row instead of buffering it all — for scanning
    * large tables without exhausting memory. The Rust core fetches in batches of
    * `batchSize` behind a bounded channel (server-side cursor on Postgres).

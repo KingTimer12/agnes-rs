@@ -123,7 +123,9 @@ await db.select("user").orderBy(u.id).page(3, 20).all(); // rows 41–60
 await db.select("user").orderBy(u.id).limit(20).offset(40).all(); // same
 ```
 
-`.first()` returns one row or `null`. `.bypassCache()` skips the cache for that
+`.first()` returns one row or `null`. `.count()` returns the matching row count
+(`SELECT COUNT(*)`, honoring `.where()`/joins) and `.exists()` returns a boolean
+(`SELECT 1 … LIMIT 1`). `.bypassCache()` skips the cache for that
 query. `.freshRead()` forces the read onto the write master (read-your-writes) —
 only relevant with `replicas`, to avoid reading stale data off a lagging replica
 right after a write.

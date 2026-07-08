@@ -89,6 +89,10 @@ rows = (db.select("user")
 
 with_posts = db.select("user").include({"posts": query().limit(3)}).all()
 
+# count / exists — honor where() and joins
+n = db.select("user").where(gt(U.age, 18)).count()
+has_any = db.select("user").where(eq(U.active, True)).exists()
+
 # pagination: limit/offset, or page(page, per_page) (1-based) — pair with order_by
 page3 = db.select("user").order_by(U.id).page(3, 20).all()          # rows 41–60
 same = db.select("user").order_by(U.id).limit(20).offset(40).all()

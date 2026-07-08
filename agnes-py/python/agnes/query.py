@@ -431,6 +431,27 @@ class SelectBuilder:
         rows = self.all()
         return rows[0] if rows else None
 
+    def count(self) -> int:
+        """Count matching rows — SELECT COUNT(*) honoring where() and joins
+        (ignores projection, limit/offset and ordering)."""
+        d = self._dialect
+        params: List[Any] = []
+        sql = f"SELECT COUNT(*) AS {ident(d, 'n')} FROM {ident(d, self._table_name)}"
+        sql += self._build_joins()
+        sql += _build_where(d, self._conds, params)
+        rows = self._db.query(sql, params, self._opts or None)
+        return int(rows[0]["n"]) if rows else 0
+
+    def exists(self) -> bool:
+        """Whether any row matches — SELECT 1 ... LIMIT 1, honoring where()/joins."""
+        d = self._dialect
+        params: List[Any] = []
+        sql = f"SELECT 1 FROM {ident(d, self._table_name)}"
+        sql += self._build_joins()
+        sql += _build_where(d, self._conds, params)
+        sql += " LIMIT 1"
+        return len(self._db.query(sql, params, self._opts or None)) > 0
+
     def stream(self, batch_size: int = 500):
         """Stream the result row-by-row instead of buffering it all — for
         scanning large tables without exhausting memory. The Rust core fetches in

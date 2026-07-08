@@ -82,6 +82,20 @@ def test_omit_selects_rest():
     assert b.build()[0] == 'SELECT "id", "user_id", "total" FROM "orders"'
 
 
+def test_count_builds_count_star():
+    r = FakeRunner(query_result=[{"n": "42"}])
+    b = SelectBuilder(r, "orders", C, "postgres", schema).where(gt(C["total"], 0))
+    assert b.count() == 42
+    assert r.calls[0][0] == 'SELECT COUNT(*) AS "n" FROM "orders" WHERE "total" > $1'
+
+
+def test_exists_returns_bool():
+    empty = SelectBuilder(FakeRunner([]), "orders", C, "postgres", schema)
+    some = SelectBuilder(FakeRunner([{"1": 1}]), "orders", C, "postgres", schema)
+    assert empty.exists() is False
+    assert some.exists() is True
+
+
 def test_limit_offset_and_page():
     sql, _ = sb().order_by(C["id"]).limit(10).offset(20).build()
     assert sql == 'SELECT * FROM "orders" ORDER BY "id" ASC LIMIT 10 OFFSET 20'

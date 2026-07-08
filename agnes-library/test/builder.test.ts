@@ -138,6 +138,35 @@ test("omit result type drops the key (compile-time)", async () => {
   expect(row.id).toBe(1);
 });
 
+test("count() builds COUNT(*) and coerces the result", async () => {
+  const { runner, calls } = (() => {
+    const calls: { sql: string; params: unknown[] }[] = [];
+    const runner: QueryRunner = {
+      async query(sql, params) {
+        calls.push({ sql, params: params ?? [] });
+        return [{ n: "42" }];
+      },
+      async mutate() {
+        return 0;
+      },
+    };
+    return { runner, calls };
+  })();
+  const n = await new SelectBuilder(runner, "orders", orderTbl.def, "postgres", schema)
+    .where(gt(o.total, 0))
+    .count();
+  expect(calls[0]!.sql).toBe(`SELECT COUNT(*) AS "n" FROM "orders" WHERE "total" > $1`);
+  expect(n).toBe(42);
+});
+
+test("exists() builds SELECT 1 LIMIT 1 and returns bool", async () => {
+  const empty: QueryRunner = { async query() { return []; }, async mutate() { return 0; } };
+  const some: QueryRunner = { async query() { return [{ "1": 1 }]; }, async mutate() { return 0; } };
+  const b = (r: QueryRunner) => new SelectBuilder(r, "orders", orderTbl.def, "postgres", schema).where(eq(o.id, 1));
+  expect(await b(empty).exists()).toBe(false);
+  expect(await b(some).exists()).toBe(true);
+});
+
 test("limit + offset and page()", () => {
   const lo = new SelectBuilder(capture().runner, "orders", orderTbl.def, "postgres", schema)
     .orderBy(o.id)
