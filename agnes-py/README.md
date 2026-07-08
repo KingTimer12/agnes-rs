@@ -89,6 +89,10 @@ rows = (db.select("user")
 
 with_posts = db.select("user").include({"posts": query().limit(3)}).all()
 
+# pagination: limit/offset, or page(page, per_page) (1-based) — pair with order_by
+page3 = db.select("user").order_by(U.id).page(3, 20).all()          # rows 41–60
+same = db.select("user").order_by(U.id).limit(20).offset(40).all()
+
 # choosing columns — two styles (`from_` has a trailing _ since `from` is a keyword):
 db.select("user").all()                         # table-first, all columns
 db.select().from_("user").all()                 # projection-first, all columns

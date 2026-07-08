@@ -82,6 +82,18 @@ def test_omit_selects_rest():
     assert b.build()[0] == 'SELECT "id", "user_id", "total" FROM "orders"'
 
 
+def test_limit_offset_and_page():
+    sql, _ = sb().order_by(C["id"]).limit(10).offset(20).build()
+    assert sql == 'SELECT * FROM "orders" ORDER BY "id" ASC LIMIT 10 OFFSET 20'
+    assert sb().page(3, 20).build()[0] == 'SELECT * FROM "orders" LIMIT 20 OFFSET 40'
+
+
+def test_offset_without_limit_dialect_fallback():
+    assert sb().offset(5).build()[0] == 'SELECT * FROM "orders" OFFSET 5'
+    assert sb("sqlite").offset(5).build()[0] == 'SELECT * FROM "orders" LIMIT -1 OFFSET 5'
+    assert sb("mysql").offset(5).build()[0] == "SELECT * FROM `orders` LIMIT 18446744073709551615 OFFSET 5"
+
+
 def test_plain_and():
     sql, params = sb().where(eq(C["status"], "paid"), gt(C["total"], 10)).build()
     assert sql == 'SELECT * FROM "orders" WHERE "status" = $1 AND "total" > $2'

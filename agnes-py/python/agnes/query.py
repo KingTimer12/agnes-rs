@@ -233,6 +233,7 @@ class SelectBuilder:
         self._schema = schema
         self._conds: List[Condition] = []
         self._limit_n: Optional[int] = None
+        self._offset_n: Optional[int] = None
         self._order_by_col: Optional[str] = None
         self._order_dir = "asc"
         self._opts: Dict[str, Any] = {}
@@ -256,6 +257,19 @@ class SelectBuilder:
 
     def limit(self, n: int) -> "SelectBuilder":
         self._limit_n = n
+        return self
+
+    def offset(self, n: int) -> "SelectBuilder":
+        """Skip the first n rows (pair with limit()/order_by())."""
+        self._offset_n = n
+        return self
+
+    def page(self, page: int, per_page: int) -> "SelectBuilder":
+        """Page through results: page is 1-based, per_page rows each. Sets both
+        limit and offset. Use with order_by() for stable ordering."""
+        p = max(1, int(page))
+        self._limit_n = per_page
+        self._offset_n = (p - 1) * per_page
         return self
 
     def ttl(self, secs: int) -> "SelectBuilder":
@@ -349,6 +363,22 @@ class SelectBuilder:
                 keys.append(pk)
         return ", ".join(ident(self._dialect, self._physical(k)) for k in keys)
 
+    def _limit_offset(self) -> str:
+        """LIMIT/OFFSET tail. OFFSET needs a LIMIT on MySQL and SQLite, so an
+        offset without a limit emits a dialect 'all rows' sentinel."""
+        limit_n, offset_n, d = self._limit_n, self._offset_n, self._dialect
+        if limit_n is None and offset_n is None:
+            return ""
+        if offset_n is None:
+            return f" LIMIT {limit_n}"
+        if limit_n is not None:
+            return f" LIMIT {limit_n} OFFSET {offset_n}"
+        if d == "postgres":
+            return f" OFFSET {offset_n}"
+        if d == "mysql":
+            return f" LIMIT 18446744073709551615 OFFSET {offset_n}"
+        return f" LIMIT -1 OFFSET {offset_n}"  # sqlite
+
     def build(self) -> Tuple[str, List[Any]]:
         params: List[Any] = []
         d = self._dialect
@@ -357,8 +387,7 @@ class SelectBuilder:
         sql += _build_where(d, self._conds, params)
         if self._order_by_col:
             sql += f" ORDER BY {ident(d, self._order_by_col)} {self._order_dir.upper()}"
-        if self._limit_n is not None:
-            sql += f" LIMIT {self._limit_n}"
+        sql += self._limit_offset()
         return sql, params
 
     def aggregate(self, aggs: Dict[str, Aggregate]) -> List[Dict[str, Any]]:
@@ -389,8 +418,7 @@ class SelectBuilder:
             sql += " HAVING " + " AND ".join(parts)
         if self._order_by_col:
             sql += f" ORDER BY {ident(d, self._order_by_col)} {self._order_dir.upper()}"
-        if self._limit_n is not None:
-            sql += f" LIMIT {self._limit_n}"
+        sql += self._limit_offset()
         return self._db.query(sql, params, self._opts or None)
 
     def all(self) -> List[Dict[str, Any]]:

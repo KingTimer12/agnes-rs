@@ -17,6 +17,7 @@ export class SelectBuilder<
 > {
   private conds: Condition[] = [];
   private limitN?: number;
+  private offsetN?: number;
   private orderByCol?: string;
   private orderDir: "asc" | "desc" = "asc";
   private opts: QueryOpts = {};
@@ -53,6 +54,27 @@ export class SelectBuilder<
 
   limit(n: number): this {
     this.limitN = n;
+    return this;
+  }
+
+  /** Skip the first `n` rows (pair with `.limit()` / `.orderBy()`). */
+  offset(n: number): this {
+    this.offsetN = n;
+    return this;
+  }
+
+  /**
+   * Page through results: `page` is 1-based, `perPage` rows each. Sets both
+   * `limit` and `offset`. Use with `.orderBy()` for stable ordering.
+   *
+   * ```ts
+   * db.select("user").orderBy(u.id).page(3, 20).all(); // rows 41–60
+   * ```
+   */
+  page(page: number, perPage: number): this {
+    const p = Math.max(1, Math.floor(page));
+    this.limitN = perPage;
+    this.offsetN = (p - 1) * perPage;
     return this;
   }
 
@@ -205,6 +227,26 @@ export class SelectBuilder<
     return keys.map((k) => ident(this.dialect, this.physical(k))).join(", ");
   }
 
+  /**
+   * `LIMIT`/`OFFSET` tail. `OFFSET` needs a `LIMIT` on MySQL and SQLite, so when
+   * an offset is set without a limit we emit a dialect "all rows" sentinel.
+   */
+  private limitOffset(): string {
+    const { limitN, offsetN, dialect } = this;
+    if (limitN === undefined && offsetN === undefined) return "";
+    if (offsetN === undefined) return ` LIMIT ${limitN}`;
+    if (limitN !== undefined) return ` LIMIT ${limitN} OFFSET ${offsetN}`;
+    // offset without limit
+    switch (dialect) {
+      case "postgres":
+        return ` OFFSET ${offsetN}`;
+      case "mysql":
+        return ` LIMIT 18446744073709551615 OFFSET ${offsetN}`;
+      default: // sqlite
+        return ` LIMIT -1 OFFSET ${offsetN}`;
+    }
+  }
+
   build(): { sql: string; params: unknown[] } {
     const params: unknown[] = [];
     let sql = `SELECT ${this.selectClause()} FROM ${ident(this.dialect, this.tableName)}`;
@@ -213,9 +255,7 @@ export class SelectBuilder<
     if (this.orderByCol) {
       sql += ` ORDER BY ${ident(this.dialect, this.orderByCol)} ${this.orderDir.toUpperCase()}`;
     }
-    if (this.limitN !== undefined) {
-      sql += ` LIMIT ${this.limitN}`;
-    }
+    sql += this.limitOffset();
     return { sql, params };
   }
 
@@ -256,9 +296,7 @@ export class SelectBuilder<
     if (this.orderByCol) {
       sql += ` ORDER BY ${ident(d, this.orderByCol)} ${this.orderDir.toUpperCase()}`;
     }
-    if (this.limitN !== undefined) {
-      sql += ` LIMIT ${this.limitN}`;
-    }
+    sql += this.limitOffset();
     return (await this.db.query(sql, params, this.opts)) as (AggregateRow<A> & G)[];
   }
 

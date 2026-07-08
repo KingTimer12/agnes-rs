@@ -138,6 +138,31 @@ test("omit result type drops the key (compile-time)", async () => {
   expect(row.id).toBe(1);
 });
 
+test("limit + offset and page()", () => {
+  const lo = new SelectBuilder(capture().runner, "orders", orderTbl.def, "postgres", schema)
+    .orderBy(o.id)
+    .limit(10)
+    .offset(20)
+    .build();
+  expect(lo.sql).toBe(`SELECT * FROM "orders" ORDER BY "id" ASC LIMIT 10 OFFSET 20`);
+
+  const pg = new SelectBuilder(capture().runner, "orders", orderTbl.def, "postgres", schema)
+    .page(3, 20)
+    .build();
+  expect(pg.sql).toBe(`SELECT * FROM "orders" LIMIT 20 OFFSET 40`);
+});
+
+test("offset without limit uses dialect fallback", () => {
+  const pg = new SelectBuilder(capture().runner, "orders", orderTbl.def, "postgres", schema).offset(5).build();
+  expect(pg.sql).toBe(`SELECT * FROM "orders" OFFSET 5`);
+
+  const sq = new SelectBuilder(capture().runner, "orders", orderTbl.def, "sqlite", schema).offset(5).build();
+  expect(sq.sql).toBe(`SELECT * FROM "orders" LIMIT -1 OFFSET 5`);
+
+  const my = new SelectBuilder(capture().runner, "orders", orderTbl.def, "mysql", schema).offset(5).build();
+  expect(my.sql).toBe("SELECT * FROM `orders` LIMIT 18446744073709551615 OFFSET 5");
+});
+
 test("aggregate with groupBy + having", async () => {
   const { b, calls } = sb();
   await b
