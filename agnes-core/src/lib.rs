@@ -13,6 +13,6 @@ pub use cache::CacheBackend;
 pub use error::{AgnesError, Result};
 pub use executor::{Executor, Transaction};
 pub use key::cache_key;
-pub use parser::parse;
+pub use parser::{ParseCache, parse};
 pub use stream::{RowSender, RowStream};
 pub use types::{ParsedQuery, QueryKind, QueryOptions, Rows, Value};

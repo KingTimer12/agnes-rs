@@ -5,21 +5,26 @@ use crate::adapter::{DatabaseAdapter, DbTransaction};
 use crate::cache::CacheBackend;
 use crate::error::Result;
 use crate::key::{cache_key, tag_for_table};
-use crate::parser::parse;
+use crate::parser::ParseCache;
 use crate::types::{QueryKind, QueryOptions, Rows, Value};
 
 pub struct Executor {
     adapter: Arc<dyn DatabaseAdapter>,
     cache: Option<Arc<dyn CacheBackend>>,
+    parse_cache: Arc<ParseCache>,
 }
 
 impl Executor {
     pub fn new(adapter: Arc<dyn DatabaseAdapter>, cache: Option<Arc<dyn CacheBackend>>) -> Self {
-        Self { adapter, cache }
+        Self {
+            adapter,
+            cache,
+            parse_cache: Arc::new(ParseCache::default()),
+        }
     }
 
     pub async fn query(&self, sql: &str, params: &[Value], opts: &QueryOptions) -> Result<Rows> {
-        let parsed = parse(sql)?;
+        let parsed = self.parse_cache.get_or_parse(sql)?;
         let key = opts
             .cache_key
             .clone()
@@ -49,7 +54,7 @@ impl Executor {
     }
 
     pub async fn mutate(&self, sql: &str, params: &[Value]) -> Result<u64> {
-        let parsed = parse(sql)?;
+        let parsed = self.parse_cache.get_or_parse(sql)?;
         let affected = self.adapter.execute(sql, params).await?;
 
         if let Some(cache) = &self.cache
@@ -73,6 +78,7 @@ impl Executor {
         Ok(Transaction {
             inner: self.adapter.begin().await?,
             cache: self.cache.clone(),
+            parse_cache: self.parse_cache.clone(),
             tags: HashSet::new(),
         })
     }
@@ -84,6 +90,7 @@ impl Executor {
 pub struct Transaction {
     inner: Box<dyn DbTransaction>,
     cache: Option<Arc<dyn CacheBackend>>,
+    parse_cache: Arc<ParseCache>,
     tags: HashSet<String>,
 }
 
@@ -93,7 +100,7 @@ impl Transaction {
     }
 
     pub async fn mutate(&mut self, sql: &str, params: &[Value]) -> Result<u64> {
-        let parsed = parse(sql)?;
+        let parsed = self.parse_cache.get_or_parse(sql)?;
         let affected = self.inner.execute(sql, params).await?;
         if parsed.kind.is_mutation() {
             for t in &parsed.tables {
@@ -104,7 +111,9 @@ impl Transaction {
     }
 
     pub async fn commit(self) -> Result<()> {
-        let Transaction { inner, cache, tags } = self;
+        let Transaction {
+            inner, cache, tags, ..
+        } = self;
         inner.commit().await?;
         if let Some(cache) = &cache
             && !tags.is_empty()

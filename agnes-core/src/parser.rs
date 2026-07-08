@@ -1,9 +1,70 @@
+use std::collections::HashMap;
+use std::sync::Mutex;
+
 use sqlparser::ast::{Delete, FromTable, Insert, SetExpr, Statement, TableFactor, TableWithJoins};
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 
 use crate::error::{AgnesError, Result};
 use crate::types::{ParsedQuery, QueryKind};
+
+/// Memoizes `parse()` results keyed by the exact SQL string. The same SQL is
+/// parsed once and reused — a big win on repeated queries and, especially, on
+/// cache hits (where parsing was otherwise the dominant cost since the DB round
+/// trip is skipped).
+///
+/// Bounded via two generations: when the `young` map fills, it ages into `old`
+/// (dropping the previous `old`), so memory stays ~`2 * cap` and a churn of
+/// one-off statements can't evict a stable working set on its own. Parsing runs
+/// outside the lock, so a first-time miss never blocks other queries.
+pub struct ParseCache {
+    inner: Mutex<Segments>,
+    cap: usize,
+}
+
+#[derive(Default)]
+struct Segments {
+    young: HashMap<String, ParsedQuery>,
+    old: HashMap<String, ParsedQuery>,
+}
+
+impl ParseCache {
+    pub fn new(cap: usize) -> Self {
+        Self {
+            inner: Mutex::new(Segments::default()),
+            cap: cap.max(1),
+        }
+    }
+
+    pub fn get_or_parse(&self, sql: &str) -> Result<ParsedQuery> {
+        {
+            let mut g = self.inner.lock().unwrap();
+            if let Some(p) = g.young.get(sql) {
+                return Ok(p.clone());
+            }
+            if let Some(p) = g.old.get(sql).cloned() {
+                g.young.insert(sql.to_string(), p.clone()); // promote to young
+                return Ok(p);
+            }
+        }
+        // Parse outside the lock: concurrent first-time misses just parse twice,
+        // which is harmless and cheaper than serializing every parse.
+        let parsed = parse(sql)?;
+        let mut g = self.inner.lock().unwrap();
+        if g.young.len() >= self.cap {
+            let full = std::mem::take(&mut g.young);
+            g.old = full;
+        }
+        g.young.insert(sql.to_string(), parsed.clone());
+        Ok(parsed)
+    }
+}
+
+impl Default for ParseCache {
+    fn default() -> Self {
+        Self::new(1024)
+    }
+}
 
 pub fn parse(sql: &str) -> Result<ParsedQuery> {
     let stmts =
@@ -114,5 +175,38 @@ mod tests {
         let p = parse("INSERT INTO users (id, name) VALUES ($1, $2)").unwrap();
         assert_eq!(p.kind, QueryKind::Insert);
         assert_eq!(p.tables, vec!["users"]);
+    }
+
+    #[test]
+    fn parse_cache_hits_are_equivalent_to_parse() {
+        let cache = ParseCache::new(8);
+        let sql = "SELECT * FROM users WHERE id = $1";
+        let a = cache.get_or_parse(sql).unwrap();
+        let b = cache.get_or_parse(sql).unwrap(); // served from cache
+        assert_eq!(a.kind, b.kind);
+        assert_eq!(a.tables, b.tables);
+        assert_eq!(a.kind, parse(sql).unwrap().kind);
+    }
+
+    #[test]
+    fn parse_cache_survives_generational_eviction() {
+        let cache = ParseCache::new(2);
+        let stable = "SELECT * FROM users";
+        cache.get_or_parse(stable).unwrap();
+        // Churn well past capacity to force young→old aging twice.
+        for i in 0..10 {
+            let sql = format!("INSERT INTO logs (n) VALUES ({i})");
+            cache.get_or_parse(&sql).unwrap();
+        }
+        // Still resolves correctly (from cache or a fresh parse — same result).
+        let p = cache.get_or_parse(stable).unwrap();
+        assert_eq!(p.kind, QueryKind::Select);
+        assert_eq!(p.tables, vec!["users"]);
+    }
+
+    #[test]
+    fn parse_cache_propagates_parse_errors() {
+        let cache = ParseCache::new(4);
+        assert!(cache.get_or_parse("NOT VALID SQL @@@").is_err());
     }
 }

@@ -7,10 +7,39 @@ pub fn cache_key(sql: &str, params: &[Value]) -> String {
     hasher.update(b"\n");
     for (i, p) in params.iter().enumerate() {
         hasher.update(&(i as u32).to_le_bytes());
-        hasher.update(&p.stable_hash_bytes());
+        hash_value_into(p, &mut hasher);
     }
     let hash = hasher.finalize();
     format!("q:{}", &hash.to_hex()[..32])
+}
+
+/// Feed a param's stable byte encoding straight into the hasher — same bytes as
+/// the old `stable_hash_bytes()` but without allocating a `Vec` per param.
+fn hash_value_into(v: &Value, h: &mut blake3::Hasher) {
+    match v {
+        Value::Null => {
+            h.update(&[0]);
+        }
+        Value::Bool(b) => {
+            h.update(&[1, u8::from(*b)]);
+        }
+        Value::Int(i) => {
+            h.update(&[2]);
+            h.update(&i.to_le_bytes());
+        }
+        Value::Float(f) => {
+            h.update(&[3]);
+            h.update(&f.to_le_bytes());
+        }
+        Value::Text(s) => {
+            h.update(&[4]);
+            h.update(s.as_bytes());
+        }
+        Value::Bytes(b) => {
+            h.update(&[5]);
+            h.update(b);
+        }
+    }
 }
 
 pub fn tag_for_table(table: &str) -> String {

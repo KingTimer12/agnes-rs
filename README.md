@@ -57,6 +57,11 @@ remember to bust it. Agnes does it automatically and safely:
 - **WAL-backed & durable.** The cache is a write-ahead log (`.agnes/cache.wal`)
   with compaction, so it survives restarts instead of being a cold in-memory map.
 - **Opt-out per query** with `.bypassCache()` when you need the source of truth.
+- **Parse memoization.** Every query is parsed once (for kind + table tags) and
+  the result is memoized in a bounded, generational cache, so repeated SQL never
+  re-parses — this matters most on a cache *hit*, where the DB round trip is
+  skipped and parsing would otherwise be the dominant cost. Param hashing for
+  the cache key is allocation-free.
 
 You get Redis-style read caching with none of the "did I forget to invalidate
 that?" footguns — because invalidation is derived from the SQL itself.
