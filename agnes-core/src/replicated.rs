@@ -212,7 +212,10 @@ mod tests {
     #[async_trait]
     impl DatabaseAdapter for FakeAdapter {
         async fn query(&self, _sql: &str, _params: &[Value]) -> Result<Rows> {
-            self.log.lock().unwrap().push(format!("query:{}", self.name));
+            self.log
+                .lock()
+                .unwrap()
+                .push(format!("query:{}", self.name));
             if self.fail {
                 return Err(AgnesError::Adapter(format!("{} down", self.name)));
             }
@@ -237,7 +240,11 @@ mod tests {
         }
     }
 
-    fn node(name: &'static str, log: &Arc<Mutex<Vec<String>>>, fail: bool) -> Arc<dyn DatabaseAdapter> {
+    fn node(
+        name: &'static str,
+        log: &Arc<Mutex<Vec<String>>>,
+        fail: bool,
+    ) -> Arc<dyn DatabaseAdapter> {
         Arc::new(FakeAdapter {
             name,
             log: log.clone(),
@@ -297,7 +304,11 @@ mod tests {
     #[tokio::test]
     async fn master_only_serves_reads_when_alone() {
         let log = Arc::new(Mutex::new(vec![]));
-        let a = ReplicatedAdapter::new(node("m", &log, false), vec![], ReplicationOptions::default());
+        let a = ReplicatedAdapter::new(
+            node("m", &log, false),
+            vec![],
+            ReplicationOptions::default(),
+        );
         a.query("SELECT", &[]).await.unwrap();
         assert_eq!(*log.lock().unwrap(), vec!["query:m"]);
     }

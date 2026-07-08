@@ -5,9 +5,9 @@ use agnes_adapter_postgres::PostgresAdapter;
 use agnes_adapter_sqlite::SqliteAdapter;
 use agnes_cache::{KvConfig, KvMotor};
 use agnes_core::adapter::{DatabaseAdapter, PoolConfig};
-use agnes_core::replicated::{ReplicatedAdapter, ReplicationOptions};
 use agnes_core::cache::CacheBackend;
 use agnes_core::executor::{Executor, Transaction as CoreTx};
+use agnes_core::replicated::{ReplicatedAdapter, ReplicationOptions};
 use agnes_core::types::{QueryOptions, Value};
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyBytes, PyDict, PyList};
@@ -180,8 +180,9 @@ impl Database {
             _ => Vec::new(),
         };
         let master_read_penalty = opt_u32(config, "master_read_penalty")?.unwrap_or(100) as i64;
-        let replica_cooldown =
-            std::time::Duration::from_secs(opt_u32(config, "replica_cooldown_secs")?.unwrap_or(5) as u64);
+        let replica_cooldown = std::time::Duration::from_secs(
+            opt_u32(config, "replica_cooldown_secs")?.unwrap_or(5) as u64,
+        );
 
         let rt = Arc::new(
             tokio::runtime::Builder::new_multi_thread()
@@ -196,7 +197,9 @@ impl Database {
                 rt.block_on(async {
                     let master = connect_adapter(&driver, &url, &pool, strip_tz).await?;
                     if replicas.is_empty() {
-                        return Ok::<Arc<dyn DatabaseAdapter>, agnes_core::error::AgnesError>(master);
+                        return Ok::<Arc<dyn DatabaseAdapter>, agnes_core::error::AgnesError>(
+                            master,
+                        );
                     }
                     let mut reps = Vec::with_capacity(replicas.len());
                     for r in &replicas {
@@ -206,7 +209,8 @@ impl Database {
                         master_read_penalty,
                         cooldown: replica_cooldown,
                     };
-                    Ok(Arc::new(ReplicatedAdapter::new(master, reps, opts)) as Arc<dyn DatabaseAdapter>)
+                    Ok(Arc::new(ReplicatedAdapter::new(master, reps, opts))
+                        as Arc<dyn DatabaseAdapter>)
                 })
             })
             .map_err(err)?;

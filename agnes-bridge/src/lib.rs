@@ -93,9 +93,7 @@ impl Database {
         }
         let opts = ReplicationOptions {
           master_read_penalty: config.master_read_penalty.unwrap_or(100) as i64,
-          cooldown: std::time::Duration::from_secs(
-            config.replica_cooldown_secs.unwrap_or(5) as u64,
-          ),
+          cooldown: std::time::Duration::from_secs(config.replica_cooldown_secs.unwrap_or(5) as u64),
         };
         Arc::new(ReplicatedAdapter::new(master, replicas, opts))
       }
@@ -271,13 +269,21 @@ async fn connect_adapter(
   strip_tz: bool,
 ) -> Result<Arc<dyn DatabaseAdapter>> {
   let adapter: Arc<dyn DatabaseAdapter> = match driver {
-    "postgres" | "postgresql" | "pg" => {
-      Arc::new(PostgresAdapter::connect(url, pool, strip_tz).await.map_err(to_napi)?)
-    }
-    "mysql" | "mariadb" => {
-      Arc::new(MySqlAdapter::connect(url, pool, strip_tz).await.map_err(to_napi)?)
-    }
-    "sqlite" => Arc::new(SqliteAdapter::connect(url, pool, strip_tz).await.map_err(to_napi)?),
+    "postgres" | "postgresql" | "pg" => Arc::new(
+      PostgresAdapter::connect(url, pool, strip_tz)
+        .await
+        .map_err(to_napi)?,
+    ),
+    "mysql" | "mariadb" => Arc::new(
+      MySqlAdapter::connect(url, pool, strip_tz)
+        .await
+        .map_err(to_napi)?,
+    ),
+    "sqlite" => Arc::new(
+      SqliteAdapter::connect(url, pool, strip_tz)
+        .await
+        .map_err(to_napi)?,
+    ),
     other => return Err(Error::from_reason(format!("unknown driver: {other}"))),
   };
   Ok(adapter)

@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "agnes-adapter-mysql"
-version = "0.0.12"
+version = "0.0.13"
 dependencies = [
  "agnes-core",
  "async-trait",
@@ -17,7 +17,7 @@ dependencies = [
 
 [[package]]
 name = "agnes-adapter-postgres"
-version = "0.0.12"
+version = "0.0.13"
 dependencies = [
  "agnes-core",
  "async-trait",
@@ -30,7 +30,7 @@ dependencies = [
 
 [[package]]
 name = "agnes-adapter-sqlite"
-version = "0.0.12"
+version = "0.0.13"
 dependencies = [
  "agnes-core",
  "async-trait",
@@ -43,7 +43,7 @@ dependencies = [
 
 [[package]]
 name = "agnes-cache"
-version = "0.0.12"
+version = "0.0.13"
 dependencies = [
  "agnes-core",
  "async-trait",
@@ -58,7 +58,7 @@ dependencies = [
 
 [[package]]
 name = "agnes-core"
-version = "0.0.12"
+version = "0.0.13"
 dependencies = [
  "async-trait",
  "blake3",
@@ -73,7 +73,7 @@ dependencies = [
 
 [[package]]
 name = "agnes-py"
-version = "0.0.12"
+version = "0.0.13"
 dependencies = [
  "agnes-adapter-mysql",
  "agnes-adapter-postgres",
@@ -88,7 +88,7 @@ dependencies = [
 
 [[package]]
 name = "agnes_bridge"
-version = "0.0.12"
+version = "0.0.13"
 dependencies = [
  "agnes-adapter-mysql",
  "agnes-adapter-postgres",
