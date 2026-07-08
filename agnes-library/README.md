@@ -118,6 +118,23 @@ const adults = await db
 `.first()` returns one row or `null`. `.bypassCache()` skips the cache for that
 query.
 
+#### Choosing columns: `select().from()` and `.omit()`
+
+Two ways to start a select:
+
+```ts
+db.select("user")                    // table-first (all columns)
+
+db.select().from("user")             // projection-first — all columns
+db.select("name", "email").from("user")  // only these columns
+db.select().from("user").omit("password") // everything except password
+```
+
+`.omit(...)` saves you from listing every column just to drop one; it's typed
+against the table, and the dropped keys disappear from the result type. An empty
+`select()` means "all columns"; naming columns keeps only those. Both `.omit()`
+column names and the projection are typed from the schema.
+
 ### Streaming large results
 
 `.stream(batchSize?)` returns an async iterator that pulls rows in batches

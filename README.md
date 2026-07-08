@@ -123,6 +123,11 @@ relations, cache and transactions.
 Beyond `eq`/`gt`, the builder covers the operators you actually reach for and
 lets you nest them arbitrarily:
 
+- **Column projection.** `select("user")` for all columns, or
+  `select("name", "email").from("user")` to pick some, or
+  `select().from("user").omit("password")` to drop a few — the result type
+  updates to match, all typed from the schema.
+
 - **Conditions.** `eq` · `neq` · `gt` · `gte` · `lt` · `lte` · `like` · `ilike` ·
   `inArray` · `notInArray` · `isNull` · `isNotNull` · `between`, combined and
   nested with `and(...)` / `or(...)` / `not(...)`. Empty `inArray`/`notInArray`

@@ -213,6 +213,16 @@ export type InferRow<T extends TableDef> = {
 export type InferInsert<T extends TableDef> = Partial<InferRow<T>>;
 export type Columns<T extends TableDef> = ColFields<T>;
 
+/**
+ * Row shape after a `.select(...)` projection and/or `.omit(...)`:
+ * - `Sel` empty (`never`) → every column, minus `Om`.
+ * - `Sel` non-empty → only those columns, minus `Om`.
+ */
+export type ProjectRow<T extends TableDef, Sel extends string, Om extends string> =
+  [Sel] extends [never]
+    ? Omit<InferRow<T>, Om>
+    : Omit<Pick<InferRow<T>, Extract<Sel, keyof InferRow<T>>>, Om>;
+
 // ─── Relation key helpers ─────────────────────────────────────────────────────
 
 export type RelationKeys<T extends TableDef> = {

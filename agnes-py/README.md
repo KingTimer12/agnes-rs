@@ -83,6 +83,12 @@ rows = (db.select("user")
 
 with_posts = db.select("user").include({"posts": query().limit(3)}).all()
 
+# choosing columns — two styles (`from_` has a trailing _ since `from` is a keyword):
+db.select("user").all()                         # table-first, all columns
+db.select().from_("user").all()                 # projection-first, all columns
+db.select("name", "email").from_("user").all()  # only these columns
+db.select().from_("user").omit("password").all()  # everything except password
+
 # stream large results row-by-row (constant memory; server-side cursor on Postgres)
 for user in db.select("user").where(gt(U.age, 18)).stream(batch_size=1000):
     process(user)

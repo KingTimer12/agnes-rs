@@ -1,5 +1,5 @@
 import type { QueryOpts, QueryRunner } from "../../bridge";
-import type { Column, GroupColumns, InferRow, ManyRelation, OneRelation, ResolveIncludes, Schema, TableDef, TableEntry } from "../../schema";
+import type { Column, Columns, GroupColumns, ManyRelation, OneRelation, ProjectRow, ResolveIncludes, Schema, TableDef, TableEntry } from "../../schema";
 import { renderAgg, type Aggregate, type HavingClause } from "../aggregate";
 import type { AggregateRow, Condition, Dialect, IncludeShape, IncludeValue, WhereOp } from "../builder";
 import { buildWhere, renderCondition } from "../conditions";
@@ -12,6 +12,8 @@ export class SelectBuilder<
   S extends Schema,
   Inc extends IncludeShape<T> = Record<never, never>,
   G = Record<never, never>,
+  Sel extends string = never,
+  Om extends string = never,
 > {
   private conds: Condition[] = [];
   private limitN?: number;
@@ -22,6 +24,10 @@ export class SelectBuilder<
   private _joins: SqlJoinClause[] = [];
   private _groupBy: string[] = [];
   private _having: HavingClause[] = [];
+  /** TS column keys to project (empty = all). Set by `db.select(...fields).from()`. */
+  private _selectKeys: string[];
+  /** TS column keys to exclude. Set by `.omit(...)`. */
+  private _omitKeys: string[] = [];
 
   constructor(
     private readonly db: QueryRunner,
@@ -29,7 +35,10 @@ export class SelectBuilder<
     private readonly def: T,
     private readonly dialect: Dialect,
     private readonly schema: S,
-  ) {}
+    selectKeys: string[] = [],
+  ) {
+    this._selectKeys = [...selectKeys];
+  }
 
   where(...cs: Condition[]): this {
     this.conds.push(...cs);
@@ -62,9 +71,25 @@ export class SelectBuilder<
    * Pass `true` for defaults or a `query()` builder for filtering/ordering/limiting the relation.
    * Uses a 2-query subquery approach (no N+1: one IN query per relation).
    */
-  include<NewInc extends IncludeShape<T>>(rels: NewInc): SelectBuilder<T, S, Inc & NewInc, G> {
+  include<NewInc extends IncludeShape<T>>(rels: NewInc): SelectBuilder<T, S, Inc & NewInc, G, Sel, Om> {
     Object.assign(this._includes, rels);
-    return this as unknown as SelectBuilder<T, S, Inc & NewInc, G>;
+    return this as unknown as SelectBuilder<T, S, Inc & NewInc, G, Sel, Om>;
+  }
+
+  /**
+   * Exclude columns from the result — returns everything **except** these,
+   * so you don't have to list every column just to drop one (e.g. a password).
+   * Typed against the table's columns; combines with a `.select(...)` projection.
+   *
+   * ```ts
+   * db.select().from("user").omit("password").all();
+   * ```
+   */
+  omit<O extends keyof Columns<T> & string>(
+    ...cols: O[]
+  ): SelectBuilder<T, S, Inc, G, Sel, Om | O> {
+    this._omitKeys.push(...cols);
+    return this as unknown as SelectBuilder<T, S, Inc, G, Sel, Om | O>;
   }
 
   /**
@@ -136,9 +161,43 @@ export class SelectBuilder<
     return sql;
   }
 
+  /** All TS column keys declared on the table, in definition order. */
+  private columnKeys(): string[] {
+    return Object.keys(this.def).filter((k) => this.def[k]?._kind === "column");
+  }
+
+  /** Physical name for a TS column key (falls back to the key itself). */
+  private physical(key: string): string {
+    const col = this.def[key] as Column<unknown, boolean> | undefined;
+    return col?.name ?? key;
+  }
+
+  /**
+   * The SELECT column list: explicit projection from `.select(...)`, or all
+   * columns minus `.omit(...)`, or `*` when neither is set. When relations are
+   * included, the parent PK is force-added so children can be grouped.
+   */
+  private selectClause(): string {
+    let keys: string[];
+    if (this._selectKeys.length > 0) {
+      keys = [...this._selectKeys];
+    } else if (this._omitKeys.length > 0) {
+      keys = this.columnKeys().filter((k) => !this._omitKeys.includes(k));
+    } else {
+      return "*";
+    }
+    if (Object.keys(this._includes).length > 0) {
+      const pkKey = this.columnKeys().find(
+        (k) => (this.def[k] as Column<unknown, boolean>).flags.primary,
+      );
+      if (pkKey && !keys.includes(pkKey)) keys.push(pkKey);
+    }
+    return keys.map((k) => ident(this.dialect, this.physical(k))).join(", ");
+  }
+
   build(): { sql: string; params: unknown[] } {
     const params: unknown[] = [];
-    let sql = `SELECT * FROM ${ident(this.dialect, this.tableName)}`;
+    let sql = `SELECT ${this.selectClause()} FROM ${ident(this.dialect, this.tableName)}`;
     sql += this.buildJoins();
     sql += buildWhere(this.dialect, this.conds, params);
     if (this.orderByCol) {
@@ -193,14 +252,14 @@ export class SelectBuilder<
     return (await this.db.query(sql, params, this.opts)) as (AggregateRow<A> & G)[];
   }
 
-  async all(): Promise<(InferRow<T> & ResolveIncludes<T, S, Inc>)[]> {
+  async all(): Promise<(ProjectRow<T, Sel, Om> & ResolveIncludes<T, S, Inc>)[]> {
     const { sql, params } = this.build();
     let rows = (await this.db.query(sql, params, this.opts)) as Record<string, unknown>[];
     rows = await this._resolveIncludes(rows);
-    return rows as unknown as (InferRow<T> & ResolveIncludes<T, S, Inc>)[];
+    return rows as unknown as (ProjectRow<T, Sel, Om> & ResolveIncludes<T, S, Inc>)[];
   }
 
-  async first(): Promise<(InferRow<T> & ResolveIncludes<T, S, Inc>) | null> {
+  async first(): Promise<(ProjectRow<T, Sel, Om> & ResolveIncludes<T, S, Inc>) | null> {
     this.limit(1);
     const rows = await this.all();
     return rows[0] ?? null;
@@ -220,7 +279,7 @@ export class SelectBuilder<
    * Not available inside a transaction, and incompatible with `.include()`
    * (relations need the full result set). `.where()`/`.orderBy()`/joins work.
    */
-  async *stream(batchSize = 500): AsyncGenerator<InferRow<T>, void, unknown> {
+  async *stream(batchSize = 500): AsyncGenerator<ProjectRow<T, Sel, Om>, void, unknown> {
     if (!this.db.stream) {
       throw new Error("streaming is only available on the database, not inside a transaction");
     }
@@ -230,7 +289,7 @@ export class SelectBuilder<
     const { sql, params } = this.build();
     const handle = await this.db.stream(sql, params);
     for (;;) {
-      const batch = (await handle.nextBatch(batchSize)) as InferRow<T>[];
+      const batch = (await handle.nextBatch(batchSize)) as ProjectRow<T, Sel, Om>[];
       if (batch.length === 0) break;
       for (const row of batch) yield row;
     }

@@ -225,7 +225,7 @@ def on(main_col: Column, joined_col: Column) -> Tuple[Column, Column]:
 
 # ── SelectBuilder ────────────────────────────────────────────────────────────
 class SelectBuilder:
-    def __init__(self, db, table_name: str, definition, dialect: Dialect, schema) -> None:
+    def __init__(self, db, table_name: str, definition, dialect: Dialect, schema, select_keys=None) -> None:
         self._db = db
         self._table_name = table_name
         self._def = definition
@@ -240,6 +240,10 @@ class SelectBuilder:
         self._joins: List[Dict[str, Any]] = []
         self._group_by: List[str] = []
         self._having: List[Dict[str, Any]] = []
+        # Column keys to project (empty = all), set by db.select(*fields).from_().
+        self._select_keys: List[str] = list(select_keys or [])
+        # Column keys to exclude, set by .omit().
+        self._omit_keys: List[str] = []
 
     def where(self, *cs: Condition) -> "SelectBuilder":
         self._conds.extend(cs)
@@ -264,6 +268,16 @@ class SelectBuilder:
 
     def include(self, rels: Dict[str, Any]) -> "SelectBuilder":
         self._includes.update(rels)
+        return self
+
+    def omit(self, *cols) -> "SelectBuilder":
+        """Exclude columns from the result — everything except these. Saves
+        listing every column just to drop one (e.g. a password). Accepts column
+        keys (str) or Column handles.
+
+            db.select().from_("user").omit("password").all()
+        """
+        self._omit_keys.extend(c.name if isinstance(c, Column) else c for c in cols)
         return self
 
     def _join(self, kind: str, tbl: str, condition: Tuple[Column, Column]) -> "SelectBuilder":
@@ -306,10 +320,33 @@ class SelectBuilder:
             sql += f" = {ident(d, join_table)}.{ident(d, j['right'])}"
         return sql
 
+    def _column_keys(self) -> List[str]:
+        return [k for k, v in self._def.items() if getattr(v, "_kind", None) == "column"]
+
+    def _physical(self, key: str) -> str:
+        col = self._def.get(key)
+        return col.name if isinstance(col, Column) else key
+
+    def _select_clause(self) -> str:
+        if self._select_keys:
+            keys = list(self._select_keys)
+        elif self._omit_keys:
+            keys = [k for k in self._column_keys() if self._physical(k) not in self._omit_keys and k not in self._omit_keys]
+        else:
+            return "*"
+        if self._includes:
+            pk = next(
+                (k for k in self._column_keys() if getattr(self._def[k], "flags", {}).get("primary")),
+                None,
+            )
+            if pk and pk not in keys:
+                keys.append(pk)
+        return ", ".join(ident(self._dialect, self._physical(k)) for k in keys)
+
     def build(self) -> Tuple[str, List[Any]]:
         params: List[Any] = []
         d = self._dialect
-        sql = f"SELECT * FROM {ident(d, self._table_name)}"
+        sql = f"SELECT {self._select_clause()} FROM {ident(d, self._table_name)}"
         sql += self._build_joins()
         sql += _build_where(d, self._conds, params)
         if self._order_by_col:
@@ -505,6 +542,31 @@ class SelectBuilder:
         if rq._join_type == "inner":
             out = [r for r in out if r[rel_key] is not None]
         return out
+
+
+class SelectStart:
+    """Intermediate returned by db.select(*fields) / db.select() — call .from_(table)
+    to pick the table. Fields passed to select() become the projection (none = all
+    columns). Chain .omit(...) on the resulting builder to drop columns instead.
+
+        db.select().from_("user").all()                 # all columns
+        db.select("name", "email").from_("user").all()  # only these
+        db.select().from_("user").omit("password").all()
+    """
+
+    def __init__(self, db, dialect: Dialect, schema, fields: List[str]) -> None:
+        self._db = db
+        self._dialect = dialect
+        self._schema = schema
+        self._fields = fields
+
+    def from_(self, table: str) -> "SelectBuilder":
+        entry = self._schema.get(table)
+        if not isinstance(entry, TableEntry):
+            raise KeyError(f"unknown table {table!r}")
+        return SelectBuilder(
+            self._db, entry.table_name, entry.definition, self._dialect, self._schema, self._fields
+        )
 
 
 # ── Insert / Update / Delete ────────────────────────────────────────────────────

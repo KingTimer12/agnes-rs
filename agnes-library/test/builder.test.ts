@@ -104,6 +104,40 @@ test("nested and/or/not with correct parens and param order", () => {
   expect(params).toEqual([7, "a", "b", 0]);
 });
 
+test("select().from() selects all columns (star)", () => {
+  const b = new SelectBuilder(capture().runner, "orders", orderTbl.def, "postgres", schema);
+  expect(b.build().sql).toBe(`SELECT * FROM "orders"`);
+});
+
+test("select(fields).from() projects only those columns (physical names)", () => {
+  const b = new SelectBuilder(capture().runner, "orders", orderTbl.def, "postgres", schema, ["id", "userId"]);
+  expect(b.build().sql).toBe(`SELECT "id", "user_id" FROM "orders"`);
+});
+
+test("omit() selects all columns except the omitted ones", () => {
+  const b = new SelectBuilder(capture().runner, "orders", orderTbl.def, "postgres", schema)
+    .omit("note", "status");
+  expect(b.build().sql).toBe(`SELECT "id", "user_id", "total" FROM "orders"`);
+});
+
+test("omit result type drops the key (compile-time)", async () => {
+  const runner: QueryRunner = {
+    async query() {
+      return [{ id: 1, user_id: 2, total: 9 }];
+    },
+    async mutate() {
+      return 0;
+    },
+  };
+  const rows = await new SelectBuilder(runner, "orders", orderTbl.def, "postgres", schema)
+    .omit("note")
+    .all();
+  const row = rows[0]!;
+  // @ts-expect-error `note` was omitted from the row type
+  void row.note;
+  expect(row.id).toBe(1);
+});
+
 test("aggregate with groupBy + having", async () => {
   const { b, calls } = sb();
   await b

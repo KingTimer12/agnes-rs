@@ -68,6 +68,20 @@ def sb(dialect="postgres"):
     return SelectBuilder(FakeRunner(), "orders", C, dialect, schema)
 
 
+def test_select_star_default():
+    assert sb().build()[0] == 'SELECT * FROM "orders"'
+
+
+def test_select_projection_physical_names():
+    b = SelectBuilder(FakeRunner(), "orders", C, "postgres", schema, ["id", "userId"])
+    assert b.build()[0] == 'SELECT "id", "user_id" FROM "orders"'
+
+
+def test_omit_selects_rest():
+    b = sb().omit("note", "status")
+    assert b.build()[0] == 'SELECT "id", "user_id", "total" FROM "orders"'
+
+
 def test_plain_and():
     sql, params = sb().where(eq(C["status"], "paid"), gt(C["total"], 10)).build()
     assert sql == 'SELECT * FROM "orders" WHERE "status" = $1 AND "total" > $2'

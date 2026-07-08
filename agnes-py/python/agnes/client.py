@@ -6,8 +6,8 @@ from typing import Any, Callable, Dict, List, Optional, TypeVar
 
 from ._native import Database
 from .ddl import generate_schema_ddl
-from .query import DeleteBuilder, InsertBuilder, SelectBuilder, UpdateBuilder
-from .schema import Schema, TableEntry, flatten_schema
+from .query import DeleteBuilder, InsertBuilder, SelectBuilder, SelectStart, UpdateBuilder
+from .schema import Column, Schema, TableEntry, flatten_schema
 
 T = TypeVar("T")
 
@@ -26,9 +26,18 @@ class _ClientBase:
             raise KeyError(f"unknown table {table!r}")
         return entry
 
-    def select(self, table: str) -> SelectBuilder:
-        e = self._entry(table)
-        return SelectBuilder(self._runner, e.table_name, e.definition, self._dialect, self._schema)
+    def select(self, *args):
+        """Start a query. Two styles:
+
+        - Table-first (legacy): select("user") — a table key, builder with all columns.
+        - Projection-first: select() / select("name", "email") — the columns you want
+          (none = all), then .from_(table). Chain .omit(...) to drop columns instead.
+        """
+        if len(args) == 1 and isinstance(self._schema.get(args[0]), TableEntry):
+            e = self._entry(args[0])
+            return SelectBuilder(self._runner, e.table_name, e.definition, self._dialect, self._schema)
+        fields = [a.name if isinstance(a, Column) else a for a in args]
+        return SelectStart(self._runner, self._dialect, self._schema, fields)
 
     def insert_into(self, table: str) -> InsertBuilder:
         e = self._entry(table)

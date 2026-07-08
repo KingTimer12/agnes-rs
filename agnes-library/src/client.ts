@@ -15,7 +15,7 @@ import {
   type TableEntry,
 } from "./schema";
 import type { Dialect } from "./query/builder";
-import { InsertBuilder, UpdateBuilder, DeleteBuilder, SelectBuilder } from "./query/builders";
+import { InsertBuilder, UpdateBuilder, DeleteBuilder, SelectBuilder, SelectStart } from "./query/builders";
 import { generateSchemaDdl } from "./query/ddl";
 
 /** Query surface shared by the client and a transaction — builds against any runner. */
@@ -26,15 +26,23 @@ class ClientBase<S extends Schema> {
     protected readonly dialect: Dialect,
   ) {}
 
-  select<K extends keyof S & string>(table: K): SelectBuilder<S[K] extends TableEntry<infer D> ? D : never, S> {
-    const entry = this.schema[table] as TableEntry<TableDef>;
-    return new SelectBuilder(
-      this.runner,
-      entry.tableName,
-      entry.def,
-      this.dialect,
-      this.schema,
-    ) as unknown as SelectBuilder<S[K] extends TableEntry<infer D> ? D : never, S>;
+  /**
+   * Start a query. Two styles:
+   *
+   * - **Table-first (legacy):** `select("user")` — pass a table key, get a
+   *   builder straight away, all columns.
+   * - **Projection-first:** `select()` / `select("name", "email")` — pass the
+   *   columns you want (none = all), then call `.from(table)`. Chain `.omit(...)`
+   *   on the result to drop columns instead of listing them.
+   */
+  select<K extends keyof S & string>(table: K): SelectBuilder<S[K] extends TableEntry<infer D> ? D : never, S>;
+  select<F extends string = never>(...fields: F[]): SelectStart<S, F>;
+  select(...args: string[]): unknown {
+    if (args.length === 1 && (args[0] as string) in this.schema) {
+      const entry = this.schema[args[0] as string] as TableEntry<TableDef>;
+      return new SelectBuilder(this.runner, entry.tableName, entry.def, this.dialect, this.schema);
+    }
+    return new SelectStart(this.runner, this.dialect, this.schema, args);
   }
 
   insertInto<K extends keyof S & string>(table: K): InsertBuilder<S[K] extends TableEntry<infer D> ? D : never> {
