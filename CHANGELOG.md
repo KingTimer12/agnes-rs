@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.0.13](https://github.com/KingTimer12/agnes-rs/compare/v0.0.12...v0.0.13) (2026-07-08)
+
+
+### Features
+
+* select().from() projection with .omit() column exclusion ([2ef0aab](https://github.com/KingTimer12/agnes-rs/commit/2ef0aab7919c6f0c7f5fb8d9fd1d14c856102dfc))
+* type grouped columns in aggregate() results ([93e745e](https://github.com/KingTimer12/agnes-rs/commit/93e745eeb5a379dd1e9bac2319cfe58038e485a1))
+
+
+### Performance Improvements
+
+* memoize SQL parsing and drop per-param key allocations ([faf8209](https://github.com/KingTimer12/agnes-rs/commit/faf82098001f4bbfdc62b36213c5554b6879e834))
+
 ## [0.0.12](https://github.com/KingTimer12/agnes-rs/compare/v0.0.11...v0.0.12) (2026-07-07)
 
 
