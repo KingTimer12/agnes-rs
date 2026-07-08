@@ -70,6 +70,11 @@ fn options_from(opts: Option<&Bound<'_, PyDict>>) -> PyResult<QueryOptions> {
         {
             o.bypass_cache = v.extract::<bool>()?;
         }
+        if let Some(v) = d.get_item("read_primary")?
+            && !v.is_none()
+        {
+            o.read_primary = v.extract::<bool>()?;
+        }
     }
     Ok(o)
 }

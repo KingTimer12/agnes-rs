@@ -67,6 +67,16 @@ export class SelectBuilder<
   }
 
   /**
+   * Read-your-writes: run this read on the write **master**, skipping replicas,
+   * so replica lag can't return stale data just after a write. No-op without
+   * `replicas` configured.
+   */
+  freshRead(): this {
+    this.opts.readPrimary = true;
+    return this;
+  }
+
+  /**
    * Include related records as nested JSON.
    * Pass `true` for defaults or a `query()` builder for filtering/ordering/limiting the relation.
    * Uses a 2-query subquery approach (no N+1: one IN query per relation).

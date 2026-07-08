@@ -171,6 +171,13 @@ impl DatabaseAdapter for ReplicatedAdapter {
         self.nodes[m].adapter.execute(sql, params).await
     }
 
+    async fn query_primary(&self, sql: &str, params: &[Value]) -> Result<Rows> {
+        // Read-your-writes: force the master so replica lag can't return stale data.
+        let m = self.master;
+        let _guard = Inflight::enter(&self.nodes[m].inflight);
+        self.nodes[m].adapter.query(sql, params).await
+    }
+
     fn dialect(&self) -> Dialect {
         self.nodes[self.master].adapter.dialect()
     }
@@ -273,6 +280,18 @@ mod tests {
         a.query("SELECT", &[]).await.unwrap();
         // Tried replica first, then failed over to master.
         assert_eq!(*log.lock().unwrap(), vec!["query:r1", "query:m"]);
+    }
+
+    #[tokio::test]
+    async fn query_primary_forces_master() {
+        let log = Arc::new(Mutex::new(vec![]));
+        let a = ReplicatedAdapter::new(
+            node("m", &log, false),
+            vec![node("r1", &log, false)],
+            ReplicationOptions::default(),
+        );
+        a.query_primary("SELECT", &[]).await.unwrap();
+        assert_eq!(*log.lock().unwrap(), vec!["query:m"]);
     }
 
     #[tokio::test]

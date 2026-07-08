@@ -39,7 +39,11 @@ impl Executor {
             return Ok(rows);
         }
 
-        let rows = self.adapter.query(sql, params).await?;
+        let rows = if opts.read_primary {
+            self.adapter.query_primary(sql, params).await?
+        } else {
+            self.adapter.query(sql, params).await?
+        };
 
         if let Some(cache) = &self.cache
             && !opts.bypass_cache

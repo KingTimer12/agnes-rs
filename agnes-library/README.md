@@ -116,7 +116,9 @@ const adults = await db
 ```
 
 `.first()` returns one row or `null`. `.bypassCache()` skips the cache for that
-query.
+query. `.freshRead()` forces the read onto the write master (read-your-writes) —
+only relevant with `replicas`, to avoid reading stale data off a lagging replica
+right after a write.
 
 #### Choosing columns: `select().from()` and `.omit()`
 

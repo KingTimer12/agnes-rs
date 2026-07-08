@@ -72,4 +72,7 @@ pub struct QueryOptions {
     pub ttl_secs: Option<u64>,
     pub cache_key: Option<String>,
     pub bypass_cache: bool,
+    /// Read-your-writes: run this read on the write master (skips replicas) so
+    /// replica lag can't return stale data. No effect without replicas.
+    pub read_primary: bool,
 }

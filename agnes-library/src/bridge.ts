@@ -51,6 +51,8 @@ export interface QueryOpts {
   ttl?: number;
   cacheKey?: string;
   bypassCache?: boolean;
+  /** Read-your-writes: run this read on the write master (skips replicas). */
+  readPrimary?: boolean;
 }
 
 /** A pull-based row stream: `nextBatch(n)` resolves to up to `n` rows; `[]` = done. */

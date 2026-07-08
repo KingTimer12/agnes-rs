@@ -59,6 +59,8 @@ pub struct QueryOpts {
   pub ttl: Option<u32>,
   pub cache_key: Option<String>,
   pub bypass_cache: Option<bool>,
+  /// Read-your-writes: run this read on the write master (skips replicas).
+  pub read_primary: Option<bool>,
 }
 
 #[napi]
@@ -256,6 +258,7 @@ fn to_query_options(opts: Option<QueryOpts>) -> QueryOptions {
       ttl_secs: o.ttl.map(|t| t as u64),
       cache_key: o.cache_key,
       bypass_cache: o.bypass_cache.unwrap_or(false),
+      read_primary: o.read_primary.unwrap_or(false),
     },
   }
 }

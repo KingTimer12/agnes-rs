@@ -95,6 +95,9 @@ db.select().from_("user").all()                 # projection-first, all columns
 db.select("name", "email").from_("user").all()  # only these columns
 db.select().from_("user").omit("password").all()  # everything except password
 
+# read-your-writes: force this read onto the master (skips lagging replicas)
+fresh = db.select().from_("user").fresh_read().all()
+
 # stream large results row-by-row (constant memory; server-side cursor on Postgres)
 for user in db.select("user").where(gt(U.age, 18)).stream(batch_size=1000):
     process(user)

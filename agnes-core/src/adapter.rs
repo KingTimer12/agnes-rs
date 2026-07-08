@@ -51,6 +51,13 @@ pub trait DatabaseAdapter: Send + Sync {
     async fn execute(&self, sql: &str, params: &[Value]) -> Result<u64>;
     fn dialect(&self) -> Dialect;
 
+    /// Run a read that must observe the latest writes (read-your-writes). For a
+    /// single node this is just [`query`](Self::query); a replicated adapter
+    /// routes it to the write master to sidestep replica lag.
+    async fn query_primary(&self, sql: &str, params: &[Value]) -> Result<Rows> {
+        self.query(sql, params).await
+    }
+
     /// Stream a read query row-by-row through a bounded channel (constant
     /// memory). Spawns a background producer task, so it must be called from
     /// within a Tokio runtime context.

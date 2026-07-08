@@ -266,6 +266,12 @@ class SelectBuilder:
         self._opts["bypass_cache"] = True
         return self
 
+    def fresh_read(self) -> "SelectBuilder":
+        """Read-your-writes: run on the write master (skips replicas) so replica
+        lag can't return stale data just after a write. No-op without replicas."""
+        self._opts["read_primary"] = True
+        return self
+
     def include(self, rels: Dict[str, Any]) -> "SelectBuilder":
         self._includes.update(rels)
         return self

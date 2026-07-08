@@ -187,6 +187,9 @@ const db = await AgnesClient.create({
 - **Failover:** a read that errors puts that node in a short cooldown
   (`replicaCooldownSecs`, default 5) and retries the next-best node; a fully
   cooled-down set is still tried rather than failing fast.
+- **Read-your-writes:** `.freshRead()` on a select forces that read onto the
+  master, so a lagging replica can't return stale data right after a write.
+  (Transactions already run entirely on the master.)
 
 Implemented in the Rust core as a `DatabaseAdapter` that composes the per-node
 adapters, so the executor, cache and both SDKs get it transparently.

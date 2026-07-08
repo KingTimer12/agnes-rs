@@ -76,4 +76,6 @@ export interface QueryOpts {
   ttl?: number
   cacheKey?: string
   bypassCache?: boolean
+  /** Read-your-writes: run this read on the write master (skips replicas). */
+  readPrimary?: boolean
 }
