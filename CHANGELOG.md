@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.0.14](https://github.com/KingTimer12/agnes-rs/compare/v0.0.13...v0.0.14) (2026-07-08)
+
+
+### Features
+
+* freshRead() for read-your-writes on the master ([53d58c5](https://github.com/KingTimer12/agnes-rs/commit/53d58c5389ecefaf3d3e9e3231f05dc8102ba890))
+* master/replica read-write splitting with load-aware routing ([419289a](https://github.com/KingTimer12/agnes-rs/commit/419289a41078cb2ff2d6baa9cdae969e46f506eb))
+* pagination with offset() and page() ([e26975f](https://github.com/KingTimer12/agnes-rs/commit/e26975f130e491f269dcb88a0aa21e7726e40617))
+
+
+### Bug Fixes
+
+* lint problem ([87796d9](https://github.com/KingTimer12/agnes-rs/commit/87796d922d0b531a4399047e04505ba71f8aedfa))
+
 ## [0.0.13](https://github.com/KingTimer12/agnes-rs/compare/v0.0.12...v0.0.13) (2026-07-08)
 
 
