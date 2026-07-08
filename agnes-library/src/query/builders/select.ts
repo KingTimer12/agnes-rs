@@ -1,5 +1,5 @@
 import type { QueryOpts, QueryRunner } from "../../bridge";
-import type { Column, InferRow, ManyRelation, OneRelation, ResolveIncludes, Schema, TableDef, TableEntry } from "../../schema";
+import type { Column, GroupColumns, InferRow, ManyRelation, OneRelation, ResolveIncludes, Schema, TableDef, TableEntry } from "../../schema";
 import { renderAgg, type Aggregate, type HavingClause } from "../aggregate";
 import type { AggregateRow, Condition, Dialect, IncludeShape, IncludeValue, WhereOp } from "../builder";
 import { buildWhere, renderCondition } from "../conditions";
@@ -11,6 +11,7 @@ export class SelectBuilder<
   T extends TableDef,
   S extends Schema,
   Inc extends IncludeShape<T> = Record<never, never>,
+  G = Record<never, never>,
 > {
   private conds: Condition[] = [];
   private limitN?: number;
@@ -61,9 +62,9 @@ export class SelectBuilder<
    * Pass `true` for defaults or a `query()` builder for filtering/ordering/limiting the relation.
    * Uses a 2-query subquery approach (no N+1: one IN query per relation).
    */
-  include<NewInc extends IncludeShape<T>>(rels: NewInc): SelectBuilder<T, S, Inc & NewInc> {
+  include<NewInc extends IncludeShape<T>>(rels: NewInc): SelectBuilder<T, S, Inc & NewInc, G> {
     Object.assign(this._includes, rels);
-    return this as unknown as SelectBuilder<T, S, Inc & NewInc>;
+    return this as unknown as SelectBuilder<T, S, Inc & NewInc, G>;
   }
 
   /**
@@ -105,10 +106,16 @@ export class SelectBuilder<
     return this;
   }
 
-  /** Group aggregate results by these columns (used with `.aggregate()`). */
-  groupBy(...cols: Column<unknown, boolean>[]): this {
+  /**
+   * Group aggregate results by these columns (used with `.aggregate()`).
+   * The grouped columns flow into the `.aggregate()` result type, keyed by
+   * their physical column name.
+   */
+  groupBy<C extends Column<unknown, boolean, string>[]>(
+    ...cols: C
+  ): SelectBuilder<T, S, Inc, G & GroupColumns<C>> {
     this._groupBy.push(...cols.map((c) => c.name));
-    return this;
+    return this as unknown as SelectBuilder<T, S, Inc, G & GroupColumns<C>>;
   }
 
   /** Filter grouped rows by an aggregate, e.g. `.having(sum(o.total), ">", 100)`. */
@@ -154,10 +161,10 @@ export class SelectBuilder<
    *   .groupBy(o.userId)
    *   .having(sum(o.total), ">", 100)
    *   .aggregate({ spent: sum(o.total), orders: count() });
-   * // → { userId: ...; spent: number | null; orders: number | null }[]
+   * // → { user_id: number; spent: number | null; orders: number | null }[]
    * ```
    */
-  async aggregate<A extends Record<string, Aggregate>>(aggs: A): Promise<AggregateRow<A>[]> {
+  async aggregate<A extends Record<string, Aggregate>>(aggs: A): Promise<(AggregateRow<A> & G)[]> {
     const params: unknown[] = [];
     const d = this.dialect;
     const selectParts = [
@@ -183,7 +190,7 @@ export class SelectBuilder<
     if (this.limitN !== undefined) {
       sql += ` LIMIT ${this.limitN}`;
     }
-    return (await this.db.query(sql, params, this.opts)) as AggregateRow<A>[];
+    return (await this.db.query(sql, params, this.opts)) as (AggregateRow<A> & G)[];
   }
 
   async all(): Promise<(InferRow<T> & ResolveIncludes<T, S, Inc>)[]> {

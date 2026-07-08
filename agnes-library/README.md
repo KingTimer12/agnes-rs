@@ -203,10 +203,12 @@ const perUser = await db
   .groupBy(o.userId)
   .having(sum(o.total), ">", 100)
   .aggregate({ spent: sum(o.total), orders: count(), avgTotal: avg(o.total) });
-// → { userId: ...; spent: number | null; orders: number | null; avgTotal: number | null }[]
+// → { user_id: number; spent: number | null; orders: number | null; avgTotal: number | null }[]
 ```
 
-`count()` with no argument is `COUNT(*)`.
+`count()` with no argument is `COUNT(*)`. Columns passed to `.groupBy(...)` are
+carried into the result type, keyed by their **physical** column name and typed
+from the schema (nullable columns become `| null`).
 
 ### Insert / update / delete
 

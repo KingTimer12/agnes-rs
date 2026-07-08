@@ -14,39 +14,39 @@ export interface ColumnFlags {
   index?: IndexDef;
 }
 
-export class Column<TOut, TNullable extends boolean = false> {
+export class Column<TOut, TNullable extends boolean = false, TName extends string = string> {
   readonly _kind = "column" as const;
   readonly _phantomOut!: TOut;
   readonly _phantomNullable!: TNullable;
 
   constructor(
-    public readonly name: string,
+    public readonly name: TName,
     public readonly type: ColumnType,
     public readonly flags: ColumnFlags = {},
   ) {}
 
-  primary(): Column<TOut, TNullable> {
+  primary(): Column<TOut, TNullable, TName> {
     return new Column(this.name, this.type, { ...this.flags, primary: true });
   }
 
-  nullable(): Column<TOut, true> {
+  nullable(): Column<TOut, true, TName> {
     return new Column(this.name, this.type, { ...this.flags, nullable: true });
   }
 
-  default(v: TOut): Column<TOut, TNullable> {
+  default(v: TOut): Column<TOut, TNullable, TName> {
     return new Column(this.name, this.type, { ...this.flags, default: v });
   }
 
   /** Mark the column as auto-incrementing (its value is assigned by the DB). */
-  autoincrement(): Column<TOut, TNullable> {
+  autoincrement(): Column<TOut, TNullable, TName> {
     return new Column(this.name, this.type, { ...this.flags, autoincrement: true });
   }
 
-  index(name: string): Column<TOut, TNullable> {
+  index(name: string): Column<TOut, TNullable, TName> {
     return new Column(this.name, this.type, { ...this.flags, index: { name, unique: false } });
   }
 
-  uniqueIndex(name: string): Column<TOut, TNullable> {
+  uniqueIndex(name: string): Column<TOut, TNullable, TName> {
     return new Column(this.name, this.type, { ...this.flags, index: { name, unique: true } });
   }
 }
@@ -135,9 +135,28 @@ export type Schema = Record<string, TableEntry<TableDef>>;
  */
 export type NestedSchema = Record<string, TableEntry<TableDef> | Record<string, TableEntry<TableDef>>>;
 
-type UnionToIntersection<U> = (U extends unknown ? (k: U) => void : never) extends (k: infer I) => void
+export type UnionToIntersection<U> = (U extends unknown ? (k: U) => void : never) extends (k: infer I) => void
   ? I
   : never;
+
+/** TS value type of a single column, widened to `| null` when nullable. */
+export type ColValue<C> = C extends Column<infer O, infer Nu, string>
+  ? Nu extends true
+    ? O | null
+    : O
+  : never;
+
+/**
+ * Map a tuple of column handles (as passed to `.groupBy(...)`) to a record
+ * keyed by each column's **physical** name with its inferred value type.
+ */
+export type GroupColumns<C extends readonly Column<unknown, boolean, string>[]> = UnionToIntersection<
+  {
+    [I in keyof C]: C[I] extends Column<unknown, boolean, infer Nm>
+      ? { [P in Nm]: ColValue<C[I]> }
+      : never;
+  }[number]
+> & {};
 
 /** Type-level flatten of a NestedSchema into a flat {@link Schema}. */
 export type FlattenSchema<S> = UnionToIntersection<
@@ -169,13 +188,13 @@ export function flattenSchema(schema: NestedSchema): Schema {
 
 // ─── Column helpers ───────────────────────────────────────────────────────────
 
-export const int = (name: string) => new Column<number>(name, "int");
-export const bigint = (name: string) => new Column<bigint>(name, "bigint");
-export const text = (name: string) => new Column<string>(name, "text");
-export const bool = (name: string) => new Column<boolean>(name, "bool");
-export const float = (name: string) => new Column<number>(name, "float");
-export const bytes = (name: string) => new Column<Uint8Array>(name, "bytes");
-export const json = <T = unknown>(name: string) => new Column<T>(name, "json");
+export const int = <N extends string>(name: N) => new Column<number, false, N>(name, "int");
+export const bigint = <N extends string>(name: N) => new Column<bigint, false, N>(name, "bigint");
+export const text = <N extends string>(name: N) => new Column<string, false, N>(name, "text");
+export const bool = <N extends string>(name: N) => new Column<boolean, false, N>(name, "bool");
+export const float = <N extends string>(name: N) => new Column<number, false, N>(name, "float");
+export const bytes = <N extends string>(name: N) => new Column<Uint8Array, false, N>(name, "bytes");
+export const json = <T = unknown, N extends string = string>(name: N) => new Column<T, false, N>(name, "json");
 
 // ─── Type inference ───────────────────────────────────────────────────────────
 

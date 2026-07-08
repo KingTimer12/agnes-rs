@@ -26,9 +26,10 @@ export type Condition =
 
 export type AggFn = "count" | "sum" | "avg" | "min" | "max";
 
-/** Row shape returned by `.aggregate()`: the aliases plus any grouped columns. */
+/** Row shape returned by `.aggregate()`: one numeric column per alias. Grouped
+ * columns (from `.groupBy(...)`) are intersected in by the builder's `G` param. */
 export type AggregateRow<A extends Record<string, Aggregate>> = {
   [K in keyof A]: number | null;
-} & Record<string, unknown>;
+};
 
 export type ConflictMode = "none" | "ignore" | "merge";

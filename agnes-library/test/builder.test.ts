@@ -120,6 +120,25 @@ test("aggregate with groupBy + having", async () => {
   expect(call.params).toEqual([0, 100]);
 });
 
+test("aggregate result types grouped columns by physical name", async () => {
+  const runner: QueryRunner = {
+    async query() {
+      return [{ user_id: 7, spent: 42 }];
+    },
+    async mutate() {
+      return 0;
+    },
+  };
+  const rows = await new SelectBuilder(runner, "orders", orderTbl.def, "postgres", schema)
+    .groupBy(o.userId)
+    .aggregate({ spent: sum(o.total) });
+  // Compile-time: `user_id` is typed as number, `spent` as number | null.
+  const uid: number = rows[0]!.user_id;
+  const spent: number | null = rows[0]!.spent;
+  expect(uid).toBe(7);
+  expect(spent).toBe(42);
+});
+
 // ─── InsertBuilder ────────────────────────────────────────────────────────────
 
 function mutCapture() {
