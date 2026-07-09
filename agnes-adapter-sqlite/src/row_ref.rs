@@ -1,4 +1,6 @@
 use agnes_core::{AgnesError, Result, adapter::RowRef};
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as B64;
 use sqlx::{Column, Row, TypeInfo, ValueRef, sqlite::SqliteRow};
 
 // Newtype wrapper gives us a local type to impl traits on,
@@ -42,7 +44,7 @@ impl<'a> RowRef<SqliteRowRef<'a>> for SqliteRowRef<'a> {
 
             "BLOB" => row
                 .try_get::<Vec<u8>, _>(i)
-                .map(|b| J::Array(b.into_iter().map(|x| J::Number(x.into())).collect()))
+                .map(|b| J::String(B64.encode(b)))
                 .map_err(|e| AgnesError::Adapter(e.to_string())),
 
             // TEXT or any unrecognised affinity (e.g. empty string for computed columns)
@@ -59,8 +61,9 @@ impl<'a> TryFrom<SqliteRowRef<'a>> for serde_json::Map<String, serde_json::Value
 
     fn try_from(r: SqliteRowRef<'a>) -> Result<Self> {
         let row = r.0;
-        let mut out = serde_json::Map::new();
-        for (i, col) in row.columns().iter().enumerate() {
+        let cols = row.columns();
+        let mut out = serde_json::Map::with_capacity(cols.len());
+        for (i, col) in cols.iter().enumerate() {
             let name = col.name().to_string();
             let ty = col.type_info().name();
             out.insert(name, r.decode(i, ty)?);

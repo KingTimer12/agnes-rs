@@ -1,4 +1,6 @@
 use agnes_core::{AgnesError, Result, adapter::RowRef};
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as B64;
 use sqlx::types::chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use sqlx::{Column, Row, TypeInfo, mysql::MySqlRow};
 
@@ -36,8 +38,7 @@ impl<'a> RowRef<MySqlRowRef<'a>> for MySqlRowRef<'a> {
                 .map(|v| v.unwrap_or(J::Null)),
             "BLOB" | "TINYBLOB" | "MEDIUMBLOB" | "LONGBLOB" | "VARBINARY" | "BINARY" => {
                 row.try_get::<Option<Vec<u8>>, _>(i).map(|v| {
-                    v.map(|b| J::Array(b.into_iter().map(|x| J::Number(x.into())).collect()))
-                        .unwrap_or(J::Null)
+                    v.map(|b| J::String(B64.encode(b))).unwrap_or(J::Null)
                 })
             }
             "DATETIME" | "TIMESTAMP" => row.try_get::<Option<NaiveDateTime>, _>(i).map(|v| {
@@ -65,8 +66,9 @@ impl<'a> TryFrom<MySqlRowRef<'a>> for serde_json::Map<String, serde_json::Value>
 
     fn try_from(r: MySqlRowRef<'a>) -> Result<Self> {
         let row = r.row;
-        let mut out = serde_json::Map::new();
-        for (i, col) in row.columns().iter().enumerate() {
+        let cols = row.columns();
+        let mut out = serde_json::Map::with_capacity(cols.len());
+        for (i, col) in cols.iter().enumerate() {
             let name = col.name().to_string();
             let ty = col.type_info().name();
             out.insert(name, r.decode(i, ty)?);

@@ -8,6 +8,7 @@ version = "0.0.13"
 dependencies = [
  "agnes-core",
  "async-trait",
+ "base64",
  "futures-util",
  "serde_json",
  "sqlx",
@@ -21,6 +22,7 @@ version = "0.0.13"
 dependencies = [
  "agnes-core",
  "async-trait",
+ "base64",
  "futures-util",
  "serde_json",
  "sqlx",
@@ -34,6 +36,7 @@ version = "0.0.13"
 dependencies = [
  "agnes-core",
  "async-trait",
+ "base64",
  "futures-util",
  "serde_json",
  "sqlx",

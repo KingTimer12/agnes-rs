@@ -65,7 +65,7 @@ a real table name; each field is a column or a relation.
 | `text(name)` | `string` | |
 | `bool(name)` | `boolean` | |
 | `float(name)` | `number` | |
-| `bytes(name)` | `Uint8Array` | |
+| `bytes(name)` | `string` | read back as **base64** — `Buffer.from(v, "base64")` to decode |
 | `json<T>(name)` | `T` | typed JSON column |
 
 ### Column modifiers (chainable)

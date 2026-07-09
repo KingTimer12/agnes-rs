@@ -20,7 +20,8 @@ cd agnes-py && maturin develop --release
 ## Schema
 
 `table(def, "physical_name")`. Columns: `int_, bigint, text, bool_, float_, bytes_, json_`
-(trailing `_` avoids shadowing builtins). Modifiers: `.primary()`, `.nullable()`,
+(trailing `_` avoids shadowing builtins). `bytes_` columns are read back as a
+**base64** string — decode with `base64.b64decode(v)`. Modifiers: `.primary()`, `.nullable()`,
 `.default(v)`, `.autoincrement()`, `.index("n")`, `.unique_index("n")`.
 Relations: `one(target, local_key, target_key, OnAction, OnAction)`, `many(target, fk)`.
 
