@@ -396,6 +396,7 @@ interface DatabaseConfig {
   replicas?: string[];        // read-only replicas; `url` becomes the write master
   masterReadPenalty?: number; // load penalty on master when picking a reader (default 100)
   replicaCooldownSecs?: number; // skip a replica this long after it errors (default 5)
+  readLoadBucket?: number;    // load-bucket width; speed breaks ties within a bucket (default 4)
 }
 ```
 
@@ -410,6 +411,12 @@ the least-loaded node (by live in-flight count). The master also serves reads,
 but with a `masterReadPenalty` bias so replicas win while it's under load. A read
 that errors cools its node down (`replicaCooldownSecs`) and fails over to the
 next-best node.
+
+Load is the primary signal, but it's **bucketed** (`readLoadBucket`, default 4):
+nodes with comparable in-flight counts are then ranked by observed speed — a
+rolling average (EWMA) of each node's read latency — so among equally-busy nodes
+the faster one wins. Load still dominates across buckets, so a saturated node is
+never picked over an idle one however fast it's been.
 
 ```ts
 const db = await AgnesClient.create({

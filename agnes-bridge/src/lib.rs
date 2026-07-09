@@ -45,6 +45,10 @@ pub struct DatabaseConfig {
   pub master_read_penalty: Option<u32>,
   /// Seconds a replica is skipped for reads after it errors (default 5).
   pub replica_cooldown_secs: Option<u32>,
+  /// In-flight load is bucketed by this before ranking read nodes (default 4);
+  /// within a bucket the faster node (lower rolling latency) wins. `1` makes
+  /// every extra in-flight request matter; higher lets speed decide more often.
+  pub read_load_bucket: Option<u32>,
 }
 
 #[napi(object)]
@@ -94,6 +98,7 @@ impl Database {
         let opts = ReplicationOptions {
           master_read_penalty: config.master_read_penalty.unwrap_or(100) as i64,
           cooldown: std::time::Duration::from_secs(config.replica_cooldown_secs.unwrap_or(5) as u64),
+          load_bucket: config.read_load_bucket.unwrap_or(4) as i64,
         };
         Arc::new(ReplicatedAdapter::new(master, replicas, opts))
       }

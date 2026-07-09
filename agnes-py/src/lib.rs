@@ -183,6 +183,7 @@ impl Database {
         let replica_cooldown = std::time::Duration::from_secs(
             opt_u32(config, "replica_cooldown_secs")?.unwrap_or(5) as u64,
         );
+        let read_load_bucket = opt_u32(config, "read_load_bucket")?.unwrap_or(4) as i64;
 
         let rt = Arc::new(
             tokio::runtime::Builder::new_multi_thread()
@@ -208,6 +209,7 @@ impl Database {
                     let opts = ReplicationOptions {
                         master_read_penalty,
                         cooldown: replica_cooldown,
+                        load_bucket: read_load_bucket,
                     };
                     Ok(Arc::new(ReplicatedAdapter::new(master, reps, opts))
                         as Arc<dyn DatabaseAdapter>)

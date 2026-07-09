@@ -45,6 +45,12 @@ export interface DatabaseConfig {
   masterReadPenalty?: number;
   /** Seconds a replica is skipped for reads after it errors (default 5). */
   replicaCooldownSecs?: number;
+  /**
+   * In-flight load is bucketed by this before ranking read nodes (default 4);
+   * within a bucket the faster node (lower rolling latency) wins. `1` makes
+   * every extra in-flight request matter; higher lets speed decide more often.
+   */
+  readLoadBucket?: number;
 }
 
 export interface QueryOpts {

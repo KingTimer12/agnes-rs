@@ -6,11 +6,18 @@
 //!
 //! - **Writes** (`execute`) and **transactions** (`begin`) always go to the
 //!   master.
-//! - **Reads** (`query`, `stream`) pick the least-loaded node. "Load" is the
-//!   current in-flight request count per node — no DB round trip. The master is
-//!   a read candidate too, but carries a fixed penalty added to its score so
-//!   replicas win while the master is busy (and its own write traffic already
-//!   raises its in-flight count, deprioritizing it further under write load).
+//! - **Reads** (`query`, `stream`) pick the node with the lowest load, breaking
+//!   ties by observed speed. "Load" is the current in-flight request count per
+//!   node, bucketed so small differences don't matter — no DB round trip. The
+//!   master is a read candidate too, but carries a fixed penalty added to its
+//!   load so replicas win while the master is busy (and its own write traffic
+//!   already raises its in-flight count, deprioritizing it further under write
+//!   load).
+//! - **Speed** is a secondary key only: within the same load bucket the node
+//!   with the lower rolling-average read latency (an EWMA of past reads) wins.
+//!   Load always dominates across buckets, so a saturated node is never chosen
+//!   over an idle one no matter how fast it has been — speed only decides
+//!   between nodes that are comparably (un)busy.
 //! - **Failover:** a read that errors marks its node with a short cooldown and
 //!   retries on the next-best node; cooled-down nodes are only used if every
 //!   other candidate has also failed.
@@ -42,6 +49,11 @@ pub struct ReplicationOptions {
     pub master_read_penalty: i64,
     /// How long a node is skipped for reads after it returns an error.
     pub cooldown: Duration,
+    /// In-flight counts are divided by this to form the load bucket used as the
+    /// primary ranking key. Nodes in the same bucket are then ranked by latency,
+    /// so this sets how large a load gap must be before it overrides speed.
+    /// `1` = every extra in-flight request matters; larger = more tolerant.
+    pub load_bucket: i64,
 }
 
 impl Default for ReplicationOptions {
@@ -49,6 +61,7 @@ impl Default for ReplicationOptions {
         Self {
             master_read_penalty: 100,
             cooldown: Duration::from_secs(5),
+            load_bucket: 4,
         }
     }
 }
@@ -59,6 +72,10 @@ struct Node {
     inflight: AtomicI64,
     /// Epoch (ms via [`now_ms`]) until which this node is skipped for reads.
     cooldown_until: AtomicU64,
+    /// Rolling average read latency in microseconds (EWMA, alpha = 1/8). `0`
+    /// until the node has served a read — an unmeasured node ranks first within
+    /// its bucket so it gets tried and starts contributing data.
+    latency_us: AtomicU64,
     is_master: bool,
 }
 
@@ -104,6 +121,7 @@ impl ReplicatedAdapter {
             adapter: master,
             inflight: AtomicI64::new(0),
             cooldown_until: AtomicU64::new(0),
+            latency_us: AtomicU64::new(0),
             is_master: true,
         });
         for r in replicas {
@@ -111,6 +129,7 @@ impl ReplicatedAdapter {
                 adapter: r,
                 inflight: AtomicI64::new(0),
                 cooldown_until: AtomicU64::new(0),
+                latency_us: AtomicU64::new(0),
                 is_master: false,
             });
         }
@@ -121,23 +140,32 @@ impl ReplicatedAdapter {
         }
     }
 
-    fn read_score(&self, n: &Node) -> i64 {
+    /// Primary ranking key: bucketed in-flight load (master penalty folded in).
+    /// Dividing by `load_bucket` collapses small load differences so latency can
+    /// break the tie, while a large gap still dominates.
+    fn load_bucket(&self, n: &Node) -> i64 {
         let base = n.inflight.load(Ordering::Relaxed);
-        if n.is_master {
+        let load = if n.is_master {
             base.saturating_add(self.opts.master_read_penalty)
         } else {
             base
-        }
+        };
+        load / self.opts.load_bucket.max(1)
     }
 
-    /// Read-candidate node indices, best first: healthy nodes ranked by
-    /// ascending load score, then cooled-down nodes as a last resort so a
-    /// full-outage read still gets attempted rather than failing immediately.
+    /// Read-candidate node indices, best first. Sort key, in order: not in
+    /// cooldown, then lowest load bucket, then lowest rolling latency. So load
+    /// decides across buckets and speed only breaks ties within a bucket;
+    /// cooled-down nodes sink last as a full-outage fallback.
     fn read_order(&self) -> Vec<usize> {
         let mut idx: Vec<usize> = (0..self.nodes.len()).collect();
         idx.sort_by_key(|&i| {
             let n = &self.nodes[i];
-            (n.in_cooldown(), self.read_score(n))
+            (
+                n.in_cooldown(),
+                self.load_bucket(n),
+                n.latency_us.load(Ordering::Relaxed),
+            )
         });
         idx
     }
@@ -145,6 +173,19 @@ impl ReplicatedAdapter {
     fn mark_cooldown(&self, i: usize) {
         let until = now_ms().saturating_add(self.opts.cooldown.as_millis() as u64);
         self.nodes[i].cooldown_until.store(until, Ordering::Relaxed);
+    }
+
+    /// Fold a fresh read latency sample into a node's EWMA (alpha = 1/8). The
+    /// first sample seeds the average directly so it isn't dragged down from 0.
+    fn record_latency(&self, i: usize, sample_us: u64) {
+        let cell = &self.nodes[i].latency_us;
+        let prev = cell.load(Ordering::Relaxed);
+        let next = if prev == 0 {
+            sample_us
+        } else {
+            prev - prev / 8 + sample_us / 8
+        };
+        cell.store(next, Ordering::Relaxed);
     }
 }
 
@@ -154,8 +195,12 @@ impl DatabaseAdapter for ReplicatedAdapter {
         let mut last_err: Option<AgnesError> = None;
         for i in self.read_order() {
             let _guard = Inflight::enter(&self.nodes[i].inflight);
+            let start = Instant::now();
             match self.nodes[i].adapter.query(sql, params).await {
-                Ok(rows) => return Ok(rows),
+                Ok(rows) => {
+                    self.record_latency(i, start.elapsed().as_micros() as u64);
+                    return Ok(rows);
+                }
                 Err(e) => {
                     self.mark_cooldown(i);
                     last_err = Some(e);
@@ -299,6 +344,49 @@ mod tests {
         );
         a.query_primary("SELECT", &[]).await.unwrap();
         assert_eq!(*log.lock().unwrap(), vec!["query:m"]);
+    }
+
+    #[tokio::test]
+    async fn latency_breaks_ties_within_a_load_bucket() {
+        let log = Arc::new(Mutex::new(vec![]));
+        let a = ReplicatedAdapter::new(
+            node("m", &log, false),
+            vec![node("r1", &log, false), node("r2", &log, false)],
+            ReplicationOptions::default(),
+        );
+        // Same load (all idle → bucket 0); make r1 slower, r2 faster.
+        a.nodes[1].latency_us.store(5000, Ordering::Relaxed); // r1
+        a.nodes[2].latency_us.store(500, Ordering::Relaxed); // r2
+        a.query("SELECT", &[]).await.unwrap();
+        assert_eq!(*log.lock().unwrap(), vec!["query:r2"]);
+    }
+
+    #[tokio::test]
+    async fn load_dominates_latency_across_buckets() {
+        let log = Arc::new(Mutex::new(vec![]));
+        let a = ReplicatedAdapter::new(
+            node("m", &log, false),
+            vec![node("r1", &log, false), node("r2", &log, false)],
+            ReplicationOptions::default(), // bucket width 4
+        );
+        // r1 is blazing fast but saturated (a full bucket above r2); r2 slow but idle.
+        a.nodes[1].latency_us.store(1, Ordering::Relaxed);
+        a.nodes[1].inflight.fetch_add(8, Ordering::Relaxed); // bucket 2
+        a.nodes[2].latency_us.store(9000, Ordering::Relaxed); // bucket 0
+        a.query("SELECT", &[]).await.unwrap();
+        // Busy-but-fast r1 loses to idle-but-slow r2: load gates speed.
+        assert_eq!(*log.lock().unwrap(), vec!["query:r2"]);
+    }
+
+    #[tokio::test]
+    async fn ewma_seeds_on_first_sample() {
+        let log = Arc::new(Mutex::new(vec![]));
+        let a = ReplicatedAdapter::new(node("m", &log, false), vec![], ReplicationOptions::default());
+        a.record_latency(0, 4000);
+        assert_eq!(a.nodes[0].latency_us.load(Ordering::Relaxed), 4000);
+        // Second sample blends: 4000 - 500 + 100 = 3600.
+        a.record_latency(0, 800);
+        assert_eq!(a.nodes[0].latency_us.load(Ordering::Relaxed), 3600);
     }
 
     #[tokio::test]

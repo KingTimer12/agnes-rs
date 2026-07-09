@@ -75,11 +75,13 @@ db = AgnesClient.create(
         "replicas": ["postgres://replica-1/db", "postgres://replica-2/db"],
         "master_read_penalty": 100,      # bias reads toward replicas (default 100)
         "replica_cooldown_secs": 5,      # skip a replica this long after it errors
+        "read_load_bucket": 4,           # load-bucket width; speed breaks ties in a bucket
     },
     schema,
 )
 # With `replicas`, `url` is the write master: writes/transactions go there,
-# reads are load-balanced to the least-busy node (master included, penalized).
+# reads go to the least-busy node (master included, penalized); among nodes with
+# comparable load, the faster one (lower rolling read latency) is preferred.
 
 U = db._schema["user"].c            # column accessor: U.age, U["age"]
 

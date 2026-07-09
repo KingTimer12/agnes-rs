@@ -190,6 +190,10 @@ const db = await AgnesClient.create({
   carries a configurable load penalty (`masterReadPenalty`, default 100) so
   replicas win while it's busy — and its own write traffic raises its in-flight
   count, backing reads off it further under write load.
+- **Speed as a tiebreaker.** Load is bucketed (`readLoadBucket`, default 4);
+  among nodes in the same bucket the faster one wins, ranked by a rolling
+  average (EWMA) of its read latency. Load still dominates across buckets — a
+  saturated node is never chosen over an idle one, however fast it's been.
 - **Failover:** a read that errors puts that node in a short cooldown
   (`replicaCooldownSecs`, default 5) and retries the next-best node; a fully
   cooled-down set is still tried rather than failing fast.
