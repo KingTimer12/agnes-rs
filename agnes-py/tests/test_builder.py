@@ -251,3 +251,64 @@ def test_insert_chunks():
     n = b.values([{"userId": i} for i in range(950)])
     assert len(r.mutations) == 2  # 900 vars / 1 col = 900 rows per chunk
     assert n == 2
+
+
+# ── Soft delete ──────────────────────────────────────────────────────────────
+sd = table(
+    {
+        "id": int_("id").primary(),
+        "name": text("name"),
+        "deletedAt": text("deleted_at").soft_delete(),
+    },
+    "users",
+)
+SD = sd.definition
+sd_schema = {"user": sd}
+
+
+def sdb(dialect="postgres"):
+    return SelectBuilder(FakeRunner(), "users", SD, dialect, sd_schema)
+
+
+def test_select_auto_filters_soft_deleted():
+    assert sdb().build()[0] == 'SELECT * FROM "users" WHERE "users"."deleted_at" IS NULL'
+
+
+def test_soft_delete_filter_ands_onto_where():
+    sql, params = sdb().where(eq(SD["name"], "Ana")).build()
+    assert sql == 'SELECT * FROM "users" WHERE "name" = $1 AND "users"."deleted_at" IS NULL'
+    assert params == ["Ana"]
+
+
+def test_with_deleted_skips_filter():
+    assert sdb().with_deleted().build()[0] == 'SELECT * FROM "users"'
+
+
+def test_count_honors_soft_delete():
+    r = FakeRunner(query_result=[{"n": "0"}])
+    SelectBuilder(r, "users", SD, "postgres", sd_schema).count()
+    assert r.calls[0][0] == 'SELECT COUNT(*) AS "n" FROM "users" WHERE "users"."deleted_at" IS NULL'
+
+
+def test_delete_becomes_soft_delete_update():
+    r = FakeRunner()
+    DeleteBuilder(r, "users", SD, "postgres").where(eq(SD["id"], 1)).run()
+    assert r.mutations[0][0] == (
+        'UPDATE "users" SET "deleted_at" = CURRENT_TIMESTAMP '
+        'WHERE "id" = $1 AND "deleted_at" IS NULL'
+    )
+    assert r.mutations[0][1] == [1]
+
+
+def test_soft_delete_update_without_where():
+    r = FakeRunner()
+    DeleteBuilder(r, "users", SD, "postgres").run()
+    assert r.mutations[0][0] == (
+        'UPDATE "users" SET "deleted_at" = CURRENT_TIMESTAMP WHERE "deleted_at" IS NULL'
+    )
+
+
+def test_hard_delete_forces_real_delete():
+    r = FakeRunner()
+    DeleteBuilder(r, "users", SD, "postgres").where(eq(SD["id"], 1)).hard_delete().run()
+    assert r.mutations[0][0] == 'DELETE FROM "users" WHERE "id" = $1'

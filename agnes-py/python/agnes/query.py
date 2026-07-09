@@ -153,6 +153,14 @@ def _build_where(dialect: Dialect, conds: List[Condition], params: List[Any]) ->
     return " WHERE " + " AND ".join(parts)
 
 
+def _soft_delete_name(definition) -> Optional[str]:
+    """Physical name of the table's soft-delete marker column, if declared."""
+    for v in definition.values():
+        if getattr(v, "_kind", None) == "column" and v.flags.get("soft_delete"):
+            return v.name
+    return None
+
+
 # ── Aggregations ─────────────────────────────────────────────────────────────
 Aggregate = Dict[str, Any]  # {"fn": str, "col": str}
 
@@ -245,6 +253,8 @@ class SelectBuilder:
         self._select_keys: List[str] = list(select_keys or [])
         # Column keys to exclude, set by .omit().
         self._omit_keys: List[str] = []
+        # Include soft-deleted rows (skip the <marker> IS NULL filter).
+        self._with_deleted = False
 
     def where(self, *cs: Condition) -> "SelectBuilder":
         self._conds.extend(cs)
@@ -289,6 +299,23 @@ class SelectBuilder:
     def include(self, rels: Dict[str, Any]) -> "SelectBuilder":
         self._includes.update(rels)
         return self
+
+    def with_deleted(self) -> "SelectBuilder":
+        """Include soft-deleted rows. No-op unless the table declares a
+        soft_delete() marker column."""
+        self._with_deleted = True
+        return self
+
+    def _where_clause(self, params: List[Any]) -> str:
+        """WHERE clause including the soft-delete <marker> IS NULL filter (unless
+        with_deleted() was called or the table has no marker)."""
+        d = self._dialect
+        sql = _build_where(d, self._conds, params)
+        marker = None if self._with_deleted else _soft_delete_name(self._def)
+        if marker:
+            pred = f"{ident(d, self._table_name)}.{ident(d, marker)} IS NULL"
+            sql += f" AND {pred}" if sql else f" WHERE {pred}"
+        return sql
 
     def omit(self, *cols) -> "SelectBuilder":
         """Exclude columns from the result — everything except these. Saves
@@ -384,7 +411,7 @@ class SelectBuilder:
         d = self._dialect
         sql = f"SELECT {self._select_clause()} FROM {ident(d, self._table_name)}"
         sql += self._build_joins()
-        sql += _build_where(d, self._conds, params)
+        sql += self._where_clause(params)
         if self._order_by_col:
             sql += f" ORDER BY {ident(d, self._order_by_col)} {self._order_dir.upper()}"
         sql += self._limit_offset()
@@ -407,7 +434,7 @@ class SelectBuilder:
         select_parts += [f"{_render_agg(d, a)} AS {ident(d, alias)}" for alias, a in aggs.items()]
         sql = f"SELECT {', '.join(select_parts)} FROM {ident(d, self._table_name)}"
         sql += self._build_joins()
-        sql += _build_where(d, self._conds, params)
+        sql += self._where_clause(params)
         if self._group_by:
             sql += " GROUP BY " + ", ".join(ident(d, g) for g in self._group_by)
         if self._having:
@@ -438,7 +465,7 @@ class SelectBuilder:
         params: List[Any] = []
         sql = f"SELECT COUNT(*) AS {ident(d, 'n')} FROM {ident(d, self._table_name)}"
         sql += self._build_joins()
-        sql += _build_where(d, self._conds, params)
+        sql += self._where_clause(params)
         rows = self._db.query(sql, params, self._opts or None)
         return int(rows[0]["n"]) if rows else 0
 
@@ -448,7 +475,7 @@ class SelectBuilder:
         params: List[Any] = []
         sql = f"SELECT 1 FROM {ident(d, self._table_name)}"
         sql += self._build_joins()
-        sql += _build_where(d, self._conds, params)
+        sql += self._where_clause(params)
         sql += " LIMIT 1"
         return len(self._db.query(sql, params, self._opts or None)) > 0
 
@@ -794,6 +821,7 @@ class DeleteBuilder:
         self._dialect = dialect
         self._conds: List[Condition] = []
         self._returning = None
+        self._hard = False
 
     def where(self, *cs: Condition) -> "DeleteBuilder":
         self._conds.extend(cs)
@@ -805,11 +833,27 @@ class DeleteBuilder:
         self._returning = [c.name for c in cols] if cols else "*"
         return self
 
+    def hard_delete(self) -> "DeleteBuilder":
+        """Force a real DELETE even when the table declares a soft_delete()
+        marker. No-op for tables without one."""
+        self._hard = True
+        return self
+
     def run(self):
         d = self._dialect
         params: List[Any] = []
-        sql = f"DELETE FROM {ident(d, self._table_name)}"
+        marker = None if self._hard else _soft_delete_name(self._def)
+        table = ident(d, self._table_name)
+        # Soft delete: stamp the marker instead of removing the row. Only touch
+        # rows not already deleted so the affected-count reflects real changes.
+        if marker:
+            sql = f"UPDATE {table} SET {ident(d, marker)} = CURRENT_TIMESTAMP"
+        else:
+            sql = f"DELETE FROM {table}"
         sql += _build_where(d, self._conds, params)
+        if marker:
+            pred = f"{ident(d, marker)} IS NULL"
+            sql += f" AND {pred}" if self._conds else f" WHERE {pred}"
         sql += _returning_clause(d, self._returning)
         if self._returning:
             return self._db.query(sql, params, None)

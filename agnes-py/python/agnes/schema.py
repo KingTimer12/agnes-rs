@@ -54,6 +54,15 @@ class Column:
         self.flags["index"] = {"name": name, "unique": True}
         return self
 
+    def soft_delete(self) -> "Column":
+        """Mark this column as the table's soft-delete marker. Deletes become an
+        UPDATE that stamps it (hard_delete() forces a real DELETE); reads
+        auto-filter <col> IS NULL (with_deleted() opts out). Implies nullable —
+        a null marker means "not deleted". Use a nullable timestamp/text column."""
+        self.flags["soft_delete"] = True
+        self.flags["nullable"] = True
+        return self
+
 
 # ── Column helpers (trailing underscore where the name shadows a builtin) ──────
 def int_(name: str) -> Column:

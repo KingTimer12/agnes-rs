@@ -400,3 +400,63 @@ test("bulk insert chunks by param limit (sqlite)", async () => {
   expect(calls).toHaveLength(2);
   expect(n).toBe(2); // one affected per mutate() stub call
 });
+
+// ─── Soft delete ───────────────────────────────────────────────────────────
+const sdTbl = table(
+  {
+    id: int("id").primary(),
+    name: text("name"),
+    deletedAt: text("deleted_at").softDelete(),
+  },
+  "users",
+);
+const sdSchema = { user: sdTbl };
+const sc = columnsOf(sdTbl.def);
+
+test("select auto-filters soft-deleted rows", () => {
+  const b = new SelectBuilder(capture().runner, "users", sdTbl.def, "postgres", sdSchema);
+  expect(b.build().sql).toBe(`SELECT * FROM "users" WHERE "users"."deleted_at" IS NULL`);
+});
+
+test("soft-delete filter ANDs onto existing where", () => {
+  const b = new SelectBuilder(capture().runner, "users", sdTbl.def, "postgres", sdSchema);
+  const { sql, params } = b.where(eq(sc.name, "Ana")).build();
+  expect(sql).toBe(`SELECT * FROM "users" WHERE "name" = $1 AND "users"."deleted_at" IS NULL`);
+  expect(params).toEqual(["Ana"]);
+});
+
+test("withDeleted() skips the filter", () => {
+  const b = new SelectBuilder(capture().runner, "users", sdTbl.def, "postgres", sdSchema);
+  expect(b.withDeleted().build().sql).toBe(`SELECT * FROM "users"`);
+});
+
+test("count() honors soft-delete filter", async () => {
+  const { runner, calls } = capture();
+  await new SelectBuilder(runner, "users", sdTbl.def, "postgres", sdSchema).count();
+  expect(calls[0]!.sql).toBe(
+    `SELECT COUNT(*) AS "n" FROM "users" WHERE "users"."deleted_at" IS NULL`,
+  );
+});
+
+test("delete becomes a soft-delete UPDATE", async () => {
+  const { runner, calls } = mutCapture();
+  await new DeleteBuilder(runner, "users", sdTbl.def, "postgres").where(eq(sc.id, 1)).run();
+  expect(calls[0]!.sql).toBe(
+    `UPDATE "users" SET "deleted_at" = CURRENT_TIMESTAMP WHERE "id" = $1 AND "deleted_at" IS NULL`,
+  );
+  expect(calls[0]!.params).toEqual([1]);
+});
+
+test("soft-delete UPDATE without a where clause", async () => {
+  const { runner, calls } = mutCapture();
+  await new DeleteBuilder(runner, "users", sdTbl.def, "postgres").run();
+  expect(calls[0]!.sql).toBe(
+    `UPDATE "users" SET "deleted_at" = CURRENT_TIMESTAMP WHERE "deleted_at" IS NULL`,
+  );
+});
+
+test("hardDelete() forces a real DELETE", async () => {
+  const { runner, calls } = mutCapture();
+  await new DeleteBuilder(runner, "users", sdTbl.def, "postgres").where(eq(sc.id, 1)).hardDelete().run();
+  expect(calls[0]!.sql).toBe(`DELETE FROM "users" WHERE "id" = $1`);
+});

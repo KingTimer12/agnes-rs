@@ -12,6 +12,8 @@ export interface ColumnFlags {
   /** Auto-incrementing column (Postgres serial/identity, MySQL AUTO_INCREMENT, SQLite AUTOINCREMENT). */
   autoincrement?: boolean;
   index?: IndexDef;
+  /** Soft-delete marker: when set, deletes become `SET <col> = now` and reads filter `<col> IS NULL`. */
+  softDelete?: boolean;
 }
 
 export class Column<TOut, TNullable extends boolean = false, TName extends string = string> {
@@ -44,6 +46,16 @@ export class Column<TOut, TNullable extends boolean = false, TName extends strin
 
   index(name: string): Column<TOut, TNullable, TName> {
     return new Column(this.name, this.type, { ...this.flags, index: { name, unique: false } });
+  }
+
+  /**
+   * Mark this column as the table's soft-delete marker. Deletes become an
+   * `UPDATE` that stamps it (`.hardDelete()` forces a real `DELETE`); reads
+   * auto-filter `<col> IS NULL` (`.withDeleted()` opts out). Implies nullable —
+   * a null marker means "not deleted". Use a nullable timestamp/text column.
+   */
+  softDelete(): Column<TOut, true, TName> {
+    return new Column(this.name, this.type, { ...this.flags, softDelete: true, nullable: true });
   }
 
   uniqueIndex(name: string): Column<TOut, TNullable, TName> {
@@ -260,6 +272,17 @@ export function columnsOf<T extends TableDef>(def: T): ColFields<T> {
     }
   }
   return out as ColFields<T>;
+}
+
+/** Physical name of the table's soft-delete marker column, if one is declared. */
+export function softDeleteName(def: TableDef): string | undefined {
+  for (const key in def) {
+    const f = def[key];
+    if (f?._kind === "column" && (f as Column<unknown, boolean>).flags.softDelete) {
+      return (f as Column<unknown, boolean>).name;
+    }
+  }
+  return undefined;
 }
 
 export function relationsOf(

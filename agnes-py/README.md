@@ -22,7 +22,8 @@ cd agnes-py && maturin develop --release
 `table(def, "physical_name")`. Columns: `int_, bigint, text, bool_, float_, bytes_, json_`
 (trailing `_` avoids shadowing builtins). `bytes_` columns are read back as a
 **base64** string — decode with `base64.b64decode(v)`. Modifiers: `.primary()`, `.nullable()`,
-`.default(v)`, `.autoincrement()`, `.index("n")`, `.unique_index("n")`.
+`.default(v)`, `.autoincrement()`, `.index("n")`, `.unique_index("n")`,
+`.soft_delete()` (marks the soft-delete column; implies nullable).
 Relations: `one(target, local_key, target_key, OnAction, OnAction)`, `many(target, fk)`.
 
 ```python
@@ -124,6 +125,13 @@ db.insert_into("user").on_conflict(U.id).ignore().values({"id": 1, "name": "Ana"
 
 db.update("user", {"active": False}).where(eq(U.id, 1)).run()
 db.delete_from("post").where(eq(db._schema["post"].c.id, 2)).run()
+
+# soft deletes — declare a .soft_delete() marker column and the table switches
+# to soft-delete semantics: delete stamps the marker, reads filter it out.
+db.delete_from("user").where(eq(U.id, 1)).run()          # UPDATE ... SET deleted_at = CURRENT_TIMESTAMP
+db.select("user").all()                                  # only rows where deleted_at IS NULL
+db.select("user").with_deleted().all()                   # include soft-deleted rows
+db.delete_from("user").where(eq(U.id, 1)).hard_delete().run()  # real DELETE
 
 # returning() — get the affected rows back (Postgres/SQLite; raises on MySQL)
 created = db.insert_into("user").returning().values({"name": "Ana"})

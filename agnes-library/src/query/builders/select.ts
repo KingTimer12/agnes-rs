@@ -1,5 +1,6 @@
 import type { QueryOpts, QueryRunner } from "../../bridge";
 import type { Column, Columns, GroupColumns, ManyRelation, OneRelation, ProjectRow, ResolveIncludes, Schema, TableDef, TableEntry } from "../../schema";
+import { softDeleteName } from "../../schema";
 import { renderAgg, type Aggregate, type HavingClause } from "../aggregate";
 import type { AggregateRow, Condition, Dialect, IncludeShape, IncludeValue, WhereOp } from "../builder";
 import { buildWhere, renderCondition } from "../conditions";
@@ -29,6 +30,8 @@ export class SelectBuilder<
   private _selectKeys: string[];
   /** TS column keys to exclude. Set by `.omit(...)`. */
   private _omitKeys: string[] = [];
+  /** Include soft-deleted rows (skip the `<marker> IS NULL` filter). */
+  private _withDeleted = false;
 
   constructor(
     private readonly db: QueryRunner,
@@ -181,6 +184,30 @@ export class SelectBuilder<
     return this;
   }
 
+  /**
+   * Include soft-deleted rows in the result. No-op unless the table declares a
+   * `.softDelete()` marker column.
+   */
+  withDeleted(): this {
+    this._withDeleted = true;
+    return this;
+  }
+
+  /**
+   * WHERE clause including the soft-delete `<marker> IS NULL` filter (unless
+   * `.withDeleted()` was called or the table has no marker). Appends to any
+   * user conditions with `AND`, or emits a fresh `WHERE`.
+   */
+  private whereClause(params: unknown[]): string {
+    let sql = buildWhere(this.dialect, this.conds, params);
+    const marker = this._withDeleted ? undefined : softDeleteName(this.def);
+    if (marker) {
+      const pred = `${ident(this.dialect, this.tableName)}.${ident(this.dialect, marker)} IS NULL`;
+      sql += sql ? ` AND ${pred}` : ` WHERE ${pred}`;
+    }
+    return sql;
+  }
+
   private buildJoins(): string {
     let sql = "";
     for (const j of this._joins) {
@@ -251,7 +278,7 @@ export class SelectBuilder<
     const params: unknown[] = [];
     let sql = `SELECT ${this.selectClause()} FROM ${ident(this.dialect, this.tableName)}`;
     sql += this.buildJoins();
-    sql += buildWhere(this.dialect, this.conds, params);
+    sql += this.whereClause(params);
     if (this.orderByCol) {
       sql += ` ORDER BY ${ident(this.dialect, this.orderByCol)} ${this.orderDir.toUpperCase()}`;
     }
@@ -282,7 +309,7 @@ export class SelectBuilder<
     ];
     let sql = `SELECT ${selectParts.join(", ")} FROM ${ident(d, this.tableName)}`;
     sql += this.buildJoins();
-    sql += buildWhere(d, this.conds, params);
+    sql += this.whereClause(params);
     if (this._groupBy.length > 0) {
       sql += ` GROUP BY ${this._groupBy.map((g) => ident(d, g)).join(", ")}`;
     }
@@ -325,7 +352,7 @@ export class SelectBuilder<
     const params: unknown[] = [];
     let sql = `SELECT COUNT(*) AS ${ident(this.dialect, "n")} FROM ${ident(this.dialect, this.tableName)}`;
     sql += this.buildJoins();
-    sql += buildWhere(this.dialect, this.conds, params);
+    sql += this.whereClause(params);
     const rows = (await this.db.query(sql, params, this.opts)) as Record<string, unknown>[];
     return Number(rows[0]?.["n"] ?? 0);
   }
@@ -335,7 +362,7 @@ export class SelectBuilder<
     const params: unknown[] = [];
     let sql = `SELECT 1 FROM ${ident(this.dialect, this.tableName)}`;
     sql += this.buildJoins();
-    sql += buildWhere(this.dialect, this.conds, params);
+    sql += this.whereClause(params);
     sql += " LIMIT 1";
     const rows = (await this.db.query(sql, params, this.opts)) as unknown[];
     return rows.length > 0;

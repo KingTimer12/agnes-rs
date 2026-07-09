@@ -76,6 +76,7 @@ text("bio").nullable()              // NULL allowed → type becomes `string | n
 bool("active").default(true)        // DEFAULT
 text("name").index("name_idx")      // non-unique index
 text("email").uniqueIndex("uq")     // unique index
+text("deleted_at").softDelete()     // soft-delete marker (implies nullable)
 ```
 
 ### Relations
@@ -275,6 +276,28 @@ await db.insertInto("user").onConflict(u.id).ignore().values({ id: 1, name: "Ana
 
 `.merge()` with no args updates every inserted column except the conflict
 target. MySQL ignores the `onConflict` target and matches on its unique keys.
+
+**Soft deletes** — declare a marker column with `.softDelete()` and the table
+switches to soft-delete semantics automatically:
+
+```ts
+const user = table({
+  id: int("id").primary(),
+  name: text("name"),
+  deletedAt: text("deleted_at").softDelete(),
+}, "users");
+
+await db.deleteFrom("user").where(eq(u.id, 1)).run();
+// → UPDATE "users" SET "deleted_at" = CURRENT_TIMESTAMP WHERE "id" = $1 AND "deleted_at" IS NULL
+
+db.select("user").all();                 // only rows where deleted_at IS NULL
+db.select("user").withDeleted().all();   // include soft-deleted rows
+await db.deleteFrom("user").where(eq(u.id, 1)).hardDelete().run(); // real DELETE
+```
+
+Reads (`all`/`first`/`count`/`exists`/`stream`/`aggregate`) auto-filter the
+marker. `.include()` relation subqueries and `db.update(...)` are **not**
+filtered — soft-delete applies to the query's own table.
 
 **Returning rows** — `.returning(...cols)` on insert/update/delete returns the
 affected rows instead of a count (Postgres/SQLite `RETURNING`; no args = every
