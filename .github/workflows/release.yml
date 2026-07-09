@@ -58,6 +58,14 @@ jobs:
           (cd agnes-library && npm pkg set version="$VERSION")
           (cd agnes-cli && npm pkg set version="$VERSION")
 
+      # `bun publish` rewrites `workspace:*` deps to the version it resolves for
+      # each workspace package IN THE LOCKFILE — not the one just written to
+      # package.json. The committed lockfile lags behind release bumps, so
+      # without this it pins the stale version (e.g. agnes-library → bridge
+      # 0.0.9). Refresh the lockfile from the edited package.json versions.
+      - name: Sync lockfile to the released versions
+        run: bun install --lockfile-only
+
       # The bridge workflow publishes agnes-bridge@V before cutting the release,
       # but wait to be certain it's on npm so the published deps resolve.
       - name: Wait for agnes-bridge on npm
