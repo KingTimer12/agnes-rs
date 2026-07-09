@@ -9,6 +9,8 @@ export interface ColumnFlags {
   primary?: boolean;
   nullable?: boolean;
   default?: unknown;
+  /** Client-side default: called per row at insert time when the key is absent. */
+  defaultFn?: () => unknown;
   /** Auto-incrementing column (Postgres serial/identity, MySQL AUTO_INCREMENT, SQLite AUTOINCREMENT). */
   autoincrement?: boolean;
   index?: IndexDef;
@@ -35,8 +37,24 @@ export class Column<TOut, TNullable extends boolean = false, TName extends strin
     return new Column(this.name, this.type, { ...this.flags, nullable: true });
   }
 
-  default(v: TOut): Column<TOut, TNullable, TName> {
-    return new Column(this.name, this.type, { ...this.flags, default: v });
+  /**
+   * Default value for the column. A plain value becomes a SQL `DEFAULT` in the
+   * generated DDL. A **function** becomes a client-side default: it's called
+   * per row at insert time whenever the key is omitted — e.g. generating a
+   * UUIDv7 id — and never touches the DDL.
+   *
+   * ```ts
+   * id: text("id").default(() => uuidv7()).primary()
+   * ```
+   */
+  default(value: TOut): Column<TOut, TNullable, TName>;
+  default(fn: () => TOut): Column<TOut, TNullable, TName>;
+  default(v: TOut | (() => TOut)): Column<TOut, TNullable, TName> {
+    const flags =
+      typeof v === "function"
+        ? { ...this.flags, defaultFn: v as () => unknown }
+        : { ...this.flags, default: v };
+    return new Column(this.name, this.type, flags);
   }
 
   /** Mark the column as auto-incrementing (its value is assigned by the DB). */

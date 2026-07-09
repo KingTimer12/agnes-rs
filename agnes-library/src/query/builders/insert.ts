@@ -103,9 +103,30 @@ export class InsertBuilder<T extends TableDef, R = number> {
    * separate statements — wrap in `db.transaction` for all-or-nothing. Returns
    * the total affected-row count.
    */
+  /** Column keys carrying a client-side `.default(fn)` generator. */
+  private defaultFns(): { key: string; fn: () => unknown }[] {
+    const out: { key: string; fn: () => unknown }[] = [];
+    for (const key in this.def) {
+      const f = this.def[key] as Column<unknown, boolean> | undefined;
+      if (f?._kind === "column" && f.flags.defaultFn) out.push({ key, fn: f.flags.defaultFn });
+    }
+    return out;
+  }
+
   async values(rowOrRows: InferInsert<T> | InferInsert<T>[]): Promise<R> {
-    const rows = (Array.isArray(rowOrRows) ? rowOrRows : [rowOrRows]) as Record<string, unknown>[];
-    if (rows.length === 0) return (this._returning ? [] : 0) as R;
+    const input = (Array.isArray(rowOrRows) ? rowOrRows : [rowOrRows]) as Record<string, unknown>[];
+    if (input.length === 0) return (this._returning ? [] : 0) as R;
+
+    // Fill client-side defaults per row where the key is absent (undefined). An
+    // explicit null is respected. Clone so the caller's objects aren't mutated.
+    const gens = this.defaultFns();
+    const rows = gens.length
+      ? input.map((row) => {
+          const copy = { ...row };
+          for (const { key, fn } of gens) if (copy[key] === undefined) copy[key] = fn();
+          return copy;
+        })
+      : input;
 
     // Union of keys across rows, preserving first-seen order. Missing keys in a
     // given row insert as NULL so every tuple has the same arity.

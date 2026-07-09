@@ -73,7 +73,8 @@ a real table name; each field is a column or a relation.
 ```ts
 int("id").primary()                 // PRIMARY KEY
 text("bio").nullable()              // NULL allowed → type becomes `string | null`
-bool("active").default(true)        // DEFAULT
+bool("active").default(true)        // SQL DEFAULT (static value)
+text("id").default(() => uuidv7())  // client-side default: fn runs per insert row
 text("name").index("name_idx")      // non-unique index
 text("email").uniqueIndex("uq")     // unique index
 text("deleted_at").softDelete()     // soft-delete marker (implies nullable)

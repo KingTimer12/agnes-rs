@@ -750,6 +750,24 @@ class InsertBuilder:
         if not rows:
             return [] if self._returning else 0
 
+        # Client-side defaults: fill each row where a .default(fn) key is absent.
+        # A key present with value None is respected. Copy so callers' dicts stay
+        # untouched.
+        gens = [
+            (k, v.flags["default_fn"])
+            for k, v in self._def.items()
+            if getattr(v, "_kind", None) == "column" and v.flags.get("default_fn")
+        ]
+        if gens:
+            filled = []
+            for row in rows:
+                copy = dict(row)
+                for k, fn in gens:
+                    if k not in copy:
+                        copy[k] = fn()
+                filled.append(copy)
+            rows = filled
+
         # Union of keys across rows, first-seen order. Missing keys insert NULL.
         col_keys: List[str] = []
         seen = set()

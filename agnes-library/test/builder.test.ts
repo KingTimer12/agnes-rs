@@ -460,3 +460,44 @@ test("hardDelete() forces a real DELETE", async () => {
   await new DeleteBuilder(runner, "users", sdTbl.def, "postgres").where(eq(sc.id, 1)).hardDelete().run();
   expect(calls[0]!.sql).toBe(`DELETE FROM "users" WHERE "id" = $1`);
 });
+
+// ─── Client-side default(fn) ─────────────────────────────────────────────────
+const genTbl = table(
+  {
+    id: text("id").primary().default(() => "generated-id"),
+    name: text("name"),
+  },
+  "docs",
+);
+
+test("default(fn) fills a missing key at insert time", async () => {
+  const { runner, calls } = mutCapture();
+  await new InsertBuilder(runner, "docs", genTbl.def, "postgres").values({ name: "Ana" });
+  expect(calls[0]!.sql).toBe(`INSERT INTO "docs" ("name", "id") VALUES ($1, $2)`);
+  expect(calls[0]!.params).toEqual(["Ana", "generated-id"]);
+});
+
+test("default(fn) does not override a provided value", async () => {
+  const { runner, calls } = mutCapture();
+  await new InsertBuilder(runner, "docs", genTbl.def, "postgres").values({ id: "mine", name: "Ana" });
+  expect(calls[0]!.params).toEqual(["mine", "Ana"]);
+});
+
+test("default(fn) runs per row and fills each", async () => {
+  const { runner, calls } = mutCapture();
+  await new InsertBuilder(runner, "docs", genTbl.def, "postgres").values([
+    { name: "a" },
+    { id: "x", name: "b" },
+  ]);
+  // union of keys is name,id (first row) — second row's id slots in.
+  expect(calls[0]!.sql).toBe(`INSERT INTO "docs" ("name", "id") VALUES ($1, $2), ($3, $4)`);
+  expect(calls[0]!.params).toEqual(["a", "generated-id", "b", "x"]);
+});
+
+test("static default(v) still stays out of insert params", async () => {
+  const t = table({ id: int("id").primary(), n: int("n").default(5) }, "t");
+  const { runner, calls } = mutCapture();
+  await new InsertBuilder(runner, "t", t.def, "postgres").values({ id: 1 });
+  // no defaultFn → n omitted, DB applies its DEFAULT.
+  expect(calls[0]!.sql).toBe(`INSERT INTO "t" ("id") VALUES ($1)`);
+});

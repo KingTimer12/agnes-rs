@@ -146,6 +146,9 @@ lets you nest them arbitrarily:
   `ON DUPLICATE KEY` / `INSERT IGNORE` (mysql).
 - **RETURNING.** `.returning(...cols)` on insert/update/delete returns the
   affected rows instead of a count (Postgres/SQLite; throws on MySQL).
+- **Client-side defaults.** `.default(() => uuidv7())` runs a function per
+  inserted row to fill an omitted column — generate ids, timestamps, etc. in
+  app code. A plain `.default(value)` still maps to a SQL `DEFAULT`.
 - **Soft deletes.** Mark a column `.softDelete()` and deletes become an
   `UPDATE` that stamps it while every read auto-filters `<marker> IS NULL`.
   `.withDeleted()` opts a read back in; `.hardDelete()` forces a real `DELETE`.

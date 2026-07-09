@@ -312,3 +312,41 @@ def test_hard_delete_forces_real_delete():
     r = FakeRunner()
     DeleteBuilder(r, "users", SD, "postgres").where(eq(SD["id"], 1)).hard_delete().run()
     assert r.mutations[0][0] == 'DELETE FROM "users" WHERE "id" = $1'
+
+
+# ── Client-side default(fn) ───────────────────────────────────────────────────
+gen = table(
+    {
+        "id": text("id").primary().default(lambda: "generated-id"),
+        "name": text("name"),
+    },
+    "docs",
+)
+GEN = gen.definition
+
+
+def test_default_fn_fills_missing_key():
+    r = FakeRunner()
+    InsertBuilder(r, "docs", GEN, "postgres").values({"name": "Ana"})
+    assert r.mutations[0][0] == 'INSERT INTO "docs" ("name", "id") VALUES ($1, $2)'
+    assert r.mutations[0][1] == ["Ana", "generated-id"]
+
+
+def test_default_fn_does_not_override_provided():
+    r = FakeRunner()
+    InsertBuilder(r, "docs", GEN, "postgres").values({"id": "mine", "name": "Ana"})
+    assert r.mutations[0][1] == ["mine", "Ana"]
+
+
+def test_default_fn_runs_per_row():
+    r = FakeRunner()
+    InsertBuilder(r, "docs", GEN, "postgres").values([{"name": "a"}, {"id": "x", "name": "b"}])
+    assert r.mutations[0][0] == 'INSERT INTO "docs" ("name", "id") VALUES ($1, $2), ($3, $4)'
+    assert r.mutations[0][1] == ["a", "generated-id", "b", "x"]
+
+
+def test_static_default_stays_out_of_params():
+    t = table({"id": int_("id").primary(), "n": int_("n").default(5)}, "t")
+    r = FakeRunner()
+    InsertBuilder(r, "t", t.definition, "postgres").values({"id": 1})
+    assert r.mutations[0][0] == 'INSERT INTO "t" ("id") VALUES ($1)'

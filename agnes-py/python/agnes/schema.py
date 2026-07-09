@@ -39,7 +39,17 @@ class Column:
         return self
 
     def default(self, value: Any) -> "Column":
-        self.flags["default"] = value
+        """Default value for the column. A plain value becomes a SQL DEFAULT in
+        the generated DDL. A callable becomes a client-side default: it's called
+        per row at insert time whenever the key is omitted (e.g. generating a
+        UUIDv7 id) and never touches the DDL.
+
+            id_ = text("id").default(lambda: uuidv7()).primary()
+        """
+        if callable(value):
+            self.flags["default_fn"] = value
+        else:
+            self.flags["default"] = value
         return self
 
     def autoincrement(self) -> "Column":
