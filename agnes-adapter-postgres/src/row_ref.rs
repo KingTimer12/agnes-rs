@@ -46,9 +46,9 @@ impl<'a> RowRef<PostgresRowRef<'a>> for PostgresRowRef<'a> {
             "JSON" | "JSONB" => row
                 .try_get::<Option<serde_json::Value>, _>(i)
                 .map(|v| v.unwrap_or(J::Null)),
-            "BYTEA" => row.try_get::<Option<Vec<u8>>, _>(i).map(|v| {
-                v.map(|b| J::String(B64.encode(b))).unwrap_or(J::Null)
-            }),
+            "BYTEA" => row
+                .try_get::<Option<Vec<u8>>, _>(i)
+                .map(|v| v.map(|b| J::String(B64.encode(b))).unwrap_or(J::Null)),
             "TIMESTAMPTZ" => row.try_get::<Option<DateTime<Utc>>, _>(i).map(|v| {
                 v.map(|dt| {
                     J::String(if self.strip_tz {

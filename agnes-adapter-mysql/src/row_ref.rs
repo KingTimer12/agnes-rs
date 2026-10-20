@@ -36,11 +36,9 @@ impl<'a> RowRef<MySqlRowRef<'a>> for MySqlRowRef<'a> {
             "JSON" => row
                 .try_get::<Option<serde_json::Value>, _>(i)
                 .map(|v| v.unwrap_or(J::Null)),
-            "BLOB" | "TINYBLOB" | "MEDIUMBLOB" | "LONGBLOB" | "VARBINARY" | "BINARY" => {
-                row.try_get::<Option<Vec<u8>>, _>(i).map(|v| {
-                    v.map(|b| J::String(B64.encode(b))).unwrap_or(J::Null)
-                })
-            }
+            "BLOB" | "TINYBLOB" | "MEDIUMBLOB" | "LONGBLOB" | "VARBINARY" | "BINARY" => row
+                .try_get::<Option<Vec<u8>>, _>(i)
+                .map(|v| v.map(|b| J::String(B64.encode(b))).unwrap_or(J::Null)),
             "DATETIME" | "TIMESTAMP" => row.try_get::<Option<NaiveDateTime>, _>(i).map(|v| {
                 v.map(|dt| J::String(dt.format(NAIVE_FMT).to_string()))
                     .unwrap_or(J::Null)

@@ -381,7 +381,11 @@ mod tests {
     #[tokio::test]
     async fn ewma_seeds_on_first_sample() {
         let log = Arc::new(Mutex::new(vec![]));
-        let a = ReplicatedAdapter::new(node("m", &log, false), vec![], ReplicationOptions::default());
+        let a = ReplicatedAdapter::new(
+            node("m", &log, false),
+            vec![],
+            ReplicationOptions::default(),
+        );
         a.record_latency(0, 4000);
         assert_eq!(a.nodes[0].latency_us.load(Ordering::Relaxed), 4000);
         // Second sample blends: 4000 - 500 + 100 = 3600.
