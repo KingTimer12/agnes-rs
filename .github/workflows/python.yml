@@ -32,9 +32,12 @@ jobs:
       fail-fast: false
       matrix:
         platform:
-          # Linux builds cross-compile C (ring's asm) with zig — the container's
+          # x86_64 builds natively inside the manylinux container, which ships
+          # every CPython/PyPy — with --zig maturin skips the container and
+          # --find-interpreter only sees the runner's Pythons (3.10 + 3.x).
+          # aarch64 cross-compiles C (ring's asm) with zig — the container's
           # cross gcc doesn't define __ARM_ARCH, which breaks ring on aarch64.
-          - { os: linux, runner: ubuntu-22.04, target: x86_64, manylinux: auto, extra: "--zig" }
+          - { os: linux, runner: ubuntu-22.04, target: x86_64, manylinux: auto, extra: "" }
           - { os: linux, runner: ubuntu-22.04, target: aarch64, manylinux: auto, extra: "--zig" }
           - { os: macos, runner: macos-15-intel, target: x86_64, manylinux: "off", extra: "" }
           - { os: macos, runner: macos-latest, target: aarch64, manylinux: "off", extra: "" }
